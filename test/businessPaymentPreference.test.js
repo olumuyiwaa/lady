@@ -32,7 +32,7 @@ describe('preferredPaymentCollection = ONLINE_CARD requires Stripe to actually b
     });
     await expect(
       businesses.updateBusiness('b1', { preferredPaymentCollection: 'ONLINE_CARD' })
-    ).rejects.toMatchObject({ status: 422, message: expect.stringMatching(/Connect Stripe/) });
+    ).rejects.toMatchObject({ status: 422, message: expect.stringMatching(/Card payments are not enabled/) });
     expect(prisma.business.update).not.toHaveBeenCalled();
   });
 

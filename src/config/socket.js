@@ -2,12 +2,15 @@ const { Server } = require('socket.io');
 const jwt = require('jsonwebtoken');
 const logger = require('./logger');
 const { resolveRealtimeRole, canJoinConversation } = require('../lib/realtimeAccess');
+const { corsOptions } = require('../lib/allowedOrigins');
 
 let io;
 
 function initSocket(httpServer) {
   io = new Server(httpServer, {
-    cors: { origin: process.env.FRONTEND_URL, credentials: true },
+    // Same FRONTEND_URL list as the REST API (comma-separated, trailing slashes
+    // ignored), but not the widget domain: only the app itself opens sockets.
+    cors: corsOptions({ widget: false, credentials: true }),
   });
 
   io.use((socket, next) => {

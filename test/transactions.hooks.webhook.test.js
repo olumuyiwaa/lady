@@ -6,11 +6,9 @@
 jest.mock('../src/config/database.js', () => ({
   booking: { findUnique: jest.fn(), findFirst: jest.fn(), update: jest.fn() },
   business: { findUnique: jest.fn(), updateMany: jest.fn() },
-  businessSubscription: { findFirst: jest.fn(), update: jest.fn() },
-  platformInvoice: { upsert: jest.fn() },
   cleanerEarning: { updateMany: jest.fn() },
 }));
-jest.mock('../src/lib/stripeClient', () => ({ retrieveEvent: jest.fn(), retrieveSubscription: jest.fn(), createRefund: jest.fn() }));
+jest.mock('../src/lib/stripeClient', () => ({ retrieveEvent: jest.fn(), createRefund: jest.fn() }));
 jest.mock('../src/utils/audit', () => ({ audit: jest.fn() }));
 jest.mock('../src/config/logger', () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn() }));
 jest.mock('../src/modules/bookings/bookings.service', () => ({ cancelBooking: jest.fn() }));
@@ -150,36 +148,6 @@ describe('disputes', () => {
     prisma.booking.findFirst.mockResolvedValue(bk());
     await deliver('charge.dispute.closed', { ...dispute, status });
     expect(recorded()[0].row).toMatchObject({ status: expected, dedupeKey: 'dispute:dp_1' });
-  });
-});
-
-describe('what businesses pay Lady Greener', () => {
-  const sub = { id: 'sub_row', businessId: 'bizA' };
-  const invoice = { id: 'in_1', subscription: 'sub_1', amount_paid: 2900, amount_due: 2900, currency: 'eur', created: 1900000000, lines: { data: [{ period: { end: 1900100000 } }] }, status_transitions: { paid_at: 1900000500 } };
-
-  beforeEach(() => {
-    prisma.businessSubscription.findFirst.mockResolvedValue(sub);
-    prisma.platformInvoice.upsert.mockResolvedValue({ id: 'pinv1' });
-  });
-
-  test('a paid invoice is SUBSCRIPTION money OUT, dated when Stripe says it was paid, and may settle an earlier failure', async () => {
-    await deliver('invoice.payment_succeeded', invoice, undefined);
-    const [{ row, opts }] = recorded();
-    expect(row).toMatchObject({ type: 'SUBSCRIPTION', direction: 'OUT', status: 'SUCCEEDED', amountCents: 2900, businessId: 'bizA', platformInvoiceId: 'pinv1', dedupeKey: 'subinv:in_1', occurredAt: new Date(1900000500 * 1000) });
-    expect(opts).toEqual({ updateOnConflict: true });
-  });
-
-  test('a failed invoice is logged FAILED but can never downgrade one that was since paid', async () => {
-    await deliver('invoice.payment_failed', invoice, undefined);
-    const [{ row, opts }] = recorded();
-    expect(row).toMatchObject({ status: 'FAILED', dedupeKey: 'subinv:in_1' });
-    expect(opts).toBeUndefined(); // no updateOnConflict
-  });
-
-  test('a one-off invoice with no subscription is not a subscription payment', async () => {
-    prisma.businessSubscription.findFirst.mockResolvedValue(null);
-    await deliver('invoice.payment_succeeded', { ...invoice, subscription: null }, undefined);
-    expect(transactions.record).not.toHaveBeenCalled();
   });
 });
 

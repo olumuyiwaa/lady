@@ -18,6 +18,14 @@ async function update(req, res, next) {
     next(err);
   }
 }
+async function getPaymentStatus(req, res, next) {
+  try {
+    return success(res, 200, await service.getPaymentStatus(req.businessId));
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function getBranding(req, res, next) {
   try {
     const b = await service.getBranding(req.businessId);
@@ -155,4 +163,4 @@ async function getOnboardingStatus(req, res, next) {
   }
 }
 
-module.exports = { list, update, getBranding, updateBranding, brandingUploadUrl, addAddress, updateAddress, removeAddress, listServiceAreas, createServiceArea, updateServiceArea, deleteServiceArea, listHours, updateHours, listLocations, createLocation, getOnboardingStatus };
+module.exports = { list, update, getPaymentStatus, getBranding, updateBranding, brandingUploadUrl, addAddress, updateAddress, removeAddress, listServiceAreas, createServiceArea, updateServiceArea, deleteServiceArea, listHours, updateHours, listLocations, createLocation, getOnboardingStatus };

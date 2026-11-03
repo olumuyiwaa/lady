@@ -10,13 +10,15 @@ router.use(authenticate, scopeToBusiness);
 
 router.get('/', controller.list);
 
-// Setup checklist the dashboard uses to force new businesses through Stripe
-// Connect + services + hours + service areas before treating them as fully
-// live. Open to any authenticated business member (not owner/manager-only)
+// Setup checklist the dashboard uses to force new businesses through
+// services + hours + service areas before treating them as fully live. Open to any authenticated business member (not owner/manager-only)
 // since the dashboard shell checks this on every load to decide whether to
 // redirect at all.
 router.get('/onboarding-status', controller.getOnboardingStatus);
 router.put('/', requireRole('BUSINESS_OWNER', 'BUSINESS_MANAGER'), controller.update);
+
+// Read-only: whether card payments are enabled, plus the payment preference.
+router.get('/payment-status', requireRole('BUSINESS_OWNER', 'BUSINESS_MANAGER'), controller.getPaymentStatus);
 
 router.get('/branding', controller.getBranding);
 router.put('/branding', requireRole('BUSINESS_OWNER', 'BUSINESS_MANAGER'), controller.updateBranding);

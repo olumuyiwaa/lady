@@ -233,8 +233,8 @@ async function updateBusiness(businessId, patch) {
         !b.stripeChargesEnabled
     ) {
       const err = new Error(
-          "Connect Stripe and enable charges before selecting 'card only' — until then, choose " +
-          "'Card (when available) + offline' or 'Offline only' so customers always have a way to pay."
+          "Card payments are not enabled on this account yet, so 'card only' is not available — " +
+          "choose 'Card (when available) + offline' or 'Offline only' so customers always have a way to pay."
       );
       err.status = 422;
       throw err;
@@ -415,7 +415,12 @@ async function brandingUploadUrl(businessId, { kind, filename, contentType }) {
   return { key, uploadUrl, publicUrl: getPublicUrl(key) };
 }
 
-async function getStripeConnectStatus(businessId) {
+/**
+ * Read-only: can this business take card payments, and what is its payment
+ * preference. Lady Greener charges on its own Stripe account (see
+ * lib/stripeClient.js DIRECT_ACCOUNT), so there is nothing to connect.
+ */
+async function getPaymentStatus(businessId) {
   const b = await prisma.business.findUnique({
     where: { id: businessId },
     select: {
@@ -449,7 +454,7 @@ async function getStripeConnectStatus(businessId) {
     // kept for existing dashboard code
     readyForPayments: onlineCardReady,
 
-    // explicit product language — Connect is never required
+    // Card payments are optional: cash / bank transfer works without them.
     optional: true,
     onlineCardReady,
     canAcceptCardPayments: onlineCardReady && prefersOnline,
@@ -458,38 +463,8 @@ async function getStripeConnectStatus(businessId) {
     offlinePaymentInstructions: b.offlinePaymentInstructions || null,
     message: onlineCardReady
         ? 'Card payments are enabled via Stripe.'
-        : 'Stripe Connect is optional. You can collect payment by cash or bank transfer and mark bookings paid in the dashboard.',
+        : 'Card payments are not enabled yet. You can collect payment by cash or bank transfer and mark bookings paid in the dashboard.',
   };
-}
-
-async function startStripeConnectOnboarding(businessId, { refreshUrl, returnUrl } = {}) {
-  const { createConnectAccountAndLink } = require('../../lib/stripeClient');
-  const business = await prisma.business.findUnique({ where: { id: businessId } });
-  if (!business) {
-    const err = new Error('Business not found');
-    err.status = 404;
-    throw err;
-  }
-  return createConnectAccountAndLink(business, { refreshUrl, returnUrl });
-}
-
-async function refreshStripeConnectStatus(businessId) {
-  const { getConnectAccountStatus } = require('../../lib/stripeClient');
-  const business = await prisma.business.findUnique({ where: { id: businessId } });
-  if (!business || !business.stripeConnectedAccountId) {
-    const err = new Error('Business has not started Stripe Connect onboarding');
-    err.status = 409;
-    throw err;
-  }
-  const status = await getConnectAccountStatus(business.stripeConnectedAccountId);
-  return prisma.business.update({
-    where: { id: businessId },
-    data: {
-      stripeChargesEnabled: status.chargesEnabled,
-      stripePayoutsEnabled: status.payoutsEnabled,
-      stripeConnectOnboarded: status.detailsSubmitted,
-    },
-  });
 }
 
 // Previously passed req.body straight into `data` with no field
@@ -601,22 +576,10 @@ const ONBOARDING_STEPS = [
   { key: 'services', label: 'Add at least one service', required: true },
   { key: 'hours', label: 'Set your business hours', required: true },
   { key: 'serviceAreas', label: 'Define at least one service area', required: true },
-  {
-    key: 'stripeConnect',
-    label: 'Connect Stripe to accept card payments (optional)',
-    required: false,
-  },
 ];
 
 async function getOnboardingStatus(businessId) {
-  const [business, serviceCount, hoursCount, areaCount] = await Promise.all([
-    prisma.business.findUnique({
-      where: { id: businessId },
-      select: {
-        stripeConnectOnboarded: true,
-        stripeChargesEnabled: true,
-      },
-    }),
+  const [serviceCount, hoursCount, areaCount] = await Promise.all([
     prisma.service.count({ where: { businessId, isActive: true } }),
     prisma.businessHours.count({ where: { businessId } }),
     prisma.serviceArea.count({ where: { businessId } }),
@@ -626,7 +589,6 @@ async function getOnboardingStatus(businessId) {
     services: serviceCount > 0,
     hours: hoursCount > 0,
     serviceAreas: areaCount > 0,
-    stripeConnect: !!(business?.stripeConnectOnboarded && business?.stripeChargesEnabled),
   };
 
   const steps = ONBOARDING_STEPS.map((s) => ({
@@ -670,10 +632,8 @@ module.exports = {
   deleteServiceArea,
   listHours,
   updateHours,
-  // Stripe Connect
-  getStripeConnectStatus,
-  startStripeConnectOnboarding,
-  refreshStripeConnectStatus,
+  // Payments
+  getPaymentStatus,
   // Franchise / multi-location
   listLocations,
   createLocation,
