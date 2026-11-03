@@ -140,9 +140,9 @@ model Business {
   locations        Business[] @relation("BusinessLocations")
 
   // Stripe Connect — required before this business can accept job-level
-  // customer payments through CleanSera. Money for a paid booking is
+  // customer payments through Lady Greener. Money for a paid booking is
   // transferred to this connected account (minus the platform fee), never
-  // held in CleanSera's own Stripe balance. Subscription billing
+  // held in Lady Greener's own Stripe balance. Subscription billing
   // (BusinessSubscription below) is unrelated and unaffected by this.
   stripeConnectedAccountId   String?                    @unique
   stripeConnectOnboarded     Boolean                    @default(false)
@@ -161,7 +161,7 @@ model Business {
   contactEmail String?
   contactPhone String?
 
-  // Invoicing / BTW. Prices in CleanSera are VAT-INCLUSIVE (consumer prices in
+  // Invoicing / BTW. Prices in Lady Greener are VAT-INCLUSIVE (consumer prices in
   // NL must be); invoices extract the VAT from the gross amount. Default 21%
   // is the Dutch standard rate. Required (kvk + vat number) before an invoice
   // can be issued.
@@ -483,7 +483,7 @@ model BusinessMember {
 }
 
 // ============================================================
-// SUBSCRIPTIONS (CleanSera -> Business billing only)
+// SUBSCRIPTIONS (Lady Greener -> Business billing only)
 // ============================================================
 
 model SubscriptionPlan {
@@ -1024,7 +1024,7 @@ model Booking {
   // quotedPriceCents, purely so "referrals converted" is reportable later
   // without re-deriving it from notification logs.
   referredByCustomerId    String?
-  // Bookkeeping only — CleanSera does not process this payment
+  // Bookkeeping only — Lady Greener does not process this payment
   paymentStatus           PaymentStatus      @default(UNPAID)
   stripeCheckoutSessionId String?
   stripePaymentIntentId   String?
@@ -1353,7 +1353,7 @@ model SupportTicketMessage {
   @@index([ticketId])
 }
 
-// Messages sent to CleanSera itself from the marketing site (support form and
+// Messages sent to Lady Greener itself from the marketing site (support form and
 // demo / contact request). Platform-level, so deliberately not tied to a
 // business. Strings rather than enums so a new kind or status needs no migration:
 // kind: SUPPORT | DEMO     status: NEW | IN_PROGRESS | RESOLVED | SPAM
@@ -1644,7 +1644,7 @@ enum TransactionType {
   REFUND
   DISPUTE
   CLEANER_PAYOUT
-  SUBSCRIPTION // the business paying CleanSera
+  SUBSCRIPTION // the business paying Lady Greener
 }
 
 // Relative to the business: IN = money received, OUT = money paid or returned.
@@ -1685,7 +1685,7 @@ model Transaction {
   occurredAt  DateTime
 
   description      String?
-  counterpartyName String? // customer, cleaner or "CleanSera", as it read at the time
+  counterpartyName String? // customer, cleaner or "Lady Greener", as it read at the time
   reference        String? // free text from whoever recorded it (bank reference, invoice no.)
 
   bookingId         String?

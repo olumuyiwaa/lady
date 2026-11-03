@@ -29,7 +29,7 @@ const options = {
         info: {
             title: 'Lady Greener API',
             version: '0.1.0',
-            description: 'Multi-tenant cleaning business SaaS backend',
+            description: 'Lady Greener operations backend',
         },
         servers: [
             { url: 'http://localhost:8000/api/v1', description: 'Local' },

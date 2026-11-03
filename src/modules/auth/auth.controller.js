@@ -1,11 +1,6 @@
 const authService = require('./auth.service');
 const { success, error } = require('../../utils/response');
 
-async function register(req, res) {
-  // The one business and its owner are created by `npm run seed`.
-  return error(res, 404, 'Registration is not available');
-}
-
 async function login(req, res, next) {
   try {
     const result = await authService.login({
@@ -14,36 +9,7 @@ async function login(req, res, next) {
       userAgent: req.headers['user-agent'],
       ipAddress: req.ip,
     });
-    if (result.requiresBusinessSelection) {
-      // Credentials were correct, but this account is affiliated with more
-      // than one business. Client should present `affiliations` and re-submit
-      // login with a `businessId`.
-      return success(res, 200, result, 'Select a business to continue');
-    }
     return success(res, 200, result, 'Logged in');
-  } catch (err) {
-    next(err);
-  }
-}
-
-/** Switch the active business workspace for an already-authenticated user. */
-async function selectBusiness(req, res, next) {
-  try {
-    const tokens = await authService.selectBusiness(req.user.id, req.body.businessId, {
-      userAgent: req.headers['user-agent'],
-      ipAddress: req.ip,
-    });
-    return success(res, 200, tokens, 'Switched business');
-  } catch (err) {
-    next(err);
-  }
-}
-
-/** Lists every business (as staff or cleaner) the current user can switch into. */
-async function affiliations(req, res, next) {
-  try {
-    const list = await authService.listAffiliations(req.user.id);
-    return success(res, 200, list);
   } catch (err) {
     next(err);
   }
@@ -166,7 +132,6 @@ async function changePassword(req, res, next) {
 }
 
 module.exports = {
-  register,
   login,
   refresh,
   logout,
@@ -180,6 +145,4 @@ module.exports = {
   me,
   updateMe,
   changePassword,
-  selectBusiness,
-  affiliations,
 };

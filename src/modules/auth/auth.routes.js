@@ -13,20 +13,11 @@ const { authenticate } = require('../../middleware/authenticate');
 
 const router = express.Router();
 
-router.post(
-    '/register',
-    authLimiter,
-    [
-        body('businessName').trim().notEmpty(),
-        body('subdomain').trim().isSlug().withMessage('Subdomain must be lowercase letters, numbers, and hyphens'),
-        body('firstName').trim().notEmpty(),
-        body('lastName').trim().notEmpty(),
-        body('email').isEmail().normalizeEmail(),
-        body('phone').optional().isMobilePhone('any'),
-        body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters'),
-    ],
-    validate,
-    controller.register
+// Registration is not available — the single business and its owner are
+// created by `npm run seed`. Expose a clear 404 so scanners don't assume
+// a working signup surface.
+router.post('/register', authLimiter, (req, res) =>
+    res.status(404).json({ success: false, message: 'Registration is not available' })
 );
 
 router.post(
@@ -102,17 +93,6 @@ router.patch(
     [body('currentPassword').notEmpty(), body('newPassword').isLength({ min: 8 })],
     validate,
     controller.changePassword
-);
-
-// Multi-business affiliation: list the workspaces this account can act
-// within, and switch the active one without a full re-login.
-router.get('/affiliations', authenticate, controller.affiliations);
-router.post(
-    '/select-business',
-    authenticate,
-    [body('businessId').notEmpty()],
-    validate,
-    controller.selectBusiness
 );
 
 module.exports = router;

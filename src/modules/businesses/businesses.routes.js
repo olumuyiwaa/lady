@@ -22,15 +22,6 @@ router.get('/branding', controller.getBranding);
 router.put('/branding', requireRole('BUSINESS_OWNER', 'BUSINESS_MANAGER'), controller.updateBranding);
 router.post('/branding/upload-url', requireRole('BUSINESS_OWNER', 'BUSINESS_MANAGER'), controller.brandingUploadUrl);
 
-// Stripe Connect — onboarding a business to receive job-level customer
-// payments directly. Distinct from the platform's own subscription billing.
-// Owner/manager only: this exposes connected-account status and can kick
-// off or refresh onboarding, which is a business-financial-settings action,
-// not something a cleaner account should be able to read or trigger.
-router.get('/stripe-connect/status', requireRole('BUSINESS_OWNER', 'BUSINESS_MANAGER'), controller.getStripeConnectStatus);
-router.post('/stripe-connect/onboard', requireRole('BUSINESS_OWNER', 'BUSINESS_MANAGER'), controller.startStripeConnectOnboarding);
-router.post('/stripe-connect/refresh', requireRole('BUSINESS_OWNER', 'BUSINESS_MANAGER'), controller.refreshStripeConnectStatus);
-
 router.post('/addresses', requireRole('BUSINESS_OWNER', 'BUSINESS_MANAGER'), controller.addAddress);
 router.put('/addresses/:id', requireRole('BUSINESS_OWNER', 'BUSINESS_MANAGER'), controller.updateAddress);
 router.delete('/addresses/:id', requireRole('BUSINESS_OWNER', 'BUSINESS_MANAGER'), controller.removeAddress);

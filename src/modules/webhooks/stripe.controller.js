@@ -1,32 +1,9 @@
-const { retrieveEvent, retrieveSubscription } = require('../../lib/stripeClient');
+const { retrieveEvent } = require('../../lib/stripeClient');
 const prisma = require('../../config/database');
 const logger = require('../../config/logger');
 const { audit } = require('../../utils/audit');
 const transactions = require('../transactions/transactions.service');
 const txRows = require('../transactions/transactions.builders');
-
-/**
- * Stripe subscription status -> our SubscriptionStatus enum. Returns null for
- * states that must not overwrite what we have: `incomplete` means the first
- * payment has not happened yet, and writing an unknown value (the previous
- * code uppercased whatever Stripe sent) made Prisma throw on every retry.
- */
-function mapStripeStatus(status) {
-  switch (status) {
-    case 'trialing':
-      return 'TRIALING';
-    case 'active':
-      return 'ACTIVE';
-    case 'past_due':
-    case 'unpaid':
-      return 'PAST_DUE';
-    case 'canceled':
-    case 'incomplete_expired':
-      return 'CANCELED';
-    default:
-      return null;
-  }
-}
 
 /**
  * Job payments are direct charges, so their events arrive with event.account =
@@ -112,61 +89,7 @@ async function refundDuplicateTip(event, booking, session) {
 }
 
 const paymentIntentIdOf = (pi) => (typeof pi === 'string' ? pi : (pi && pi.id) || null);
-
 const toDate = (unixSeconds) => (unixSeconds ? new Date(unixSeconds * 1000) : null);
-
-/** Copies the fields we track from a Stripe subscription object onto our row. */
-async function syncSubscriptionRow(where, stripeSub, extra = {}) {
-  const data = { ...extra };
-  const status = mapStripeStatus(stripeSub.status);
-  if (status) data.status = status;
-  if (stripeSub.current_period_end) data.currentPeriodEnd = toDate(stripeSub.current_period_end);
-  data.trialEndsAt = toDate(stripeSub.trial_end);
-  data.canceledAt = stripeSub.cancel_at_period_end ? toDate(stripeSub.canceled_at) || new Date() : status === 'CANCELED' ? new Date() : null;
-
-  // Keep the plan in step when the price was changed in the billing portal.
-  const priceId = stripeSub.items && stripeSub.items.data && stripeSub.items.data[0] && stripeSub.items.data[0].price
-    ? stripeSub.items.data[0].price.id
-    : null;
-  if (priceId) {
-    const plan = await prisma.subscriptionPlan.findUnique({ where: { stripePriceId: priceId } });
-    if (plan) data.planId = plan.id;
-  }
-  return prisma.businessSubscription.updateMany({ where, data });
-}
-
-async function handleSubscriptionCheckoutCompleted(session) {
-  const { businessId, planId } = session.metadata || {};
-  const stripeSubId = typeof session.subscription === 'string' ? session.subscription : session.subscription && session.subscription.id;
-  if (!businessId || !planId || !stripeSubId) return;
-
-  const stripeSub = await retrieveSubscription(stripeSubId);
-  const customerId = typeof session.customer === 'string' ? session.customer : session.customer && session.customer.id;
-  const status = mapStripeStatus(stripeSub.status) || 'TRIALING';
-
-  await prisma.businessSubscription.upsert({
-    where: { businessId },
-    create: {
-      businessId,
-      planId,
-      stripeCustomerId: customerId,
-      stripeSubscriptionId: stripeSub.id,
-      status,
-      trialEndsAt: toDate(stripeSub.trial_end),
-      currentPeriodEnd: toDate(stripeSub.current_period_end),
-    },
-    update: {
-      planId,
-      stripeCustomerId: customerId,
-      stripeSubscriptionId: stripeSub.id,
-      status,
-      trialEndsAt: toDate(stripeSub.trial_end),
-      currentPeriodEnd: toDate(stripeSub.current_period_end),
-      canceledAt: null,
-    },
-  });
-  await audit({ businessId, action: 'SUBSCRIPTION_STARTED', entityType: 'BusinessSubscription', entityId: businessId, metadata: { planId, status } });
-}
 
 async function handle(req, res) {
   let event;
@@ -187,94 +110,11 @@ async function handle(req, res) {
   const obj = event.data.object;
 
   try {
-    if (type === 'invoice.payment_succeeded') {
-      const stripeSubId = obj.subscription;
-      // An invoice with no subscription (a one-off invoice) has nothing to do
-      // with plan billing. Prisma treats an undefined filter as "match
-      // anything", so without this guard the first subscription row in the
-      // table could be flipped to ACTIVE.
-      const subscription = !stripeSubId ? null : await prisma.businessSubscription.findFirst({
-        where: { stripeSubscriptionId: stripeSubId },
-      });
-      if (subscription) {
-        await prisma.businessSubscription.update({
-          where: { id: subscription.id },
-          data: {
-            status: 'ACTIVE',
-            currentPeriodEnd: new Date(obj.lines.data[0].period.end * 1000),
-          },
-        });
-        // Keep a billing-history record for the business — previously this
-        // model was defined in the schema but nothing ever wrote to it, so
-        // businesses had no invoice history for what they pay Lady Greener.
-        const paidInvoice = await prisma.platformInvoice.upsert({
-          where: { stripeInvoiceId: obj.id },
-          create: {
-            subscriptionId: subscription.id,
-            stripeInvoiceId: obj.id,
-            amountCents: obj.amount_paid,
-            status: 'paid',
-            issuedAt: new Date(obj.created * 1000),
-            paidAt: new Date(),
-          },
-          update: { status: 'paid', paidAt: new Date(), amountCents: obj.amount_paid },
-        });
-        // updateOnConflict: a retried invoice that failed earlier is now SUCCEEDED.
-        await transactions.record(txRows.subscriptionInvoice({
-          businessId: subscription.businessId,
-          platformInvoiceId: paidInvoice && paidInvoice.id,
-          invoiceId: obj.id,
-          amountCents: obj.amount_paid,
-          currency: obj.currency,
-          paid: true,
-          occurredAt: obj.status_transitions && obj.status_transitions.paid_at ? new Date(obj.status_transitions.paid_at * 1000) : new Date(),
-        }), { updateOnConflict: true });
-      }
-    } else if (type === 'invoice.payment_failed') {
-      const stripeSubId = obj.subscription;
-      const subscription = !stripeSubId ? null : await prisma.businessSubscription.findFirst({
-        where: { stripeSubscriptionId: stripeSubId },
-      });
-      if (subscription) {
-        await prisma.businessSubscription.update({
-          where: { id: subscription.id },
-          data: { status: 'PAST_DUE' },
-        });
-        const failedInvoice = await prisma.platformInvoice.upsert({
-          where: { stripeInvoiceId: obj.id },
-          create: {
-            subscriptionId: subscription.id,
-            stripeInvoiceId: obj.id,
-            amountCents: obj.amount_due,
-            status: 'open',
-            issuedAt: new Date(obj.created * 1000),
-          },
-          update: { status: 'open' },
-        });
-        // No updateOnConflict: a late "failed" event must never downgrade an invoice that has since been paid.
-        await transactions.record(txRows.subscriptionInvoice({
-          businessId: subscription.businessId,
-          platformInvoiceId: failedInvoice && failedInvoice.id,
-          invoiceId: obj.id,
-          amountCents: obj.amount_due,
-          currency: obj.currency,
-          paid: false,
-        }));
-      }
-    } else if (type === 'customer.subscription.deleted') {
-      await prisma.businessSubscription.updateMany({
-        where: { stripeSubscriptionId: obj.id },
-        data: { status: 'CANCELED', canceledAt: new Date() },
-      });
-    } else if (type === 'customer.subscription.updated') {
-      await syncSubscriptionRow({ stripeSubscriptionId: obj.id }, obj);
-    } else if (type === 'checkout.session.completed' || type === 'checkout.session.async_payment_succeeded') {
+    if (type === 'checkout.session.completed' || type === 'checkout.session.async_payment_succeeded') {
       const meta = obj.metadata || {};
-      if (obj.mode === 'subscription' || meta.purpose === 'subscription') {
-        await handleSubscriptionCheckoutCompleted(obj);
-      } else if (obj.payment_status && obj.payment_status !== 'paid') {
-        // Asynchronous methods (SEPA debit, some bank redirects) complete the
-        // session before the money arrives; checkout.session.async_payment_succeeded
+      if (obj.payment_status && obj.payment_status !== 'paid') {
+        // Asynchronous payment methods (SEPA debit, bank redirects) complete the
+        // session before money arrives; checkout.session.async_payment_succeeded
         // follows when it does. Do not mark anything paid yet.
         logger.info(`Checkout session ${obj.id} completed with payment_status=${obj.payment_status}; waiting for async confirmation`);
       } else if (meta.purpose === 'job_payment' && meta.bookingId) {
@@ -531,4 +371,4 @@ async function handle(req, res) {
   return res.json({ received: true });
 }
 
-module.exports = { handle, mapStripeStatus };
+module.exports = { handle };
