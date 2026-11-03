@@ -110,24 +110,11 @@ enum SubscriptionStatus {
   CANCELED
 }
 
-enum CustomDomainStatus {
-  PENDING
-  VERIFIED
-  FAILED
-}
-
 model Business {
   id           String   @id @default(cuid())
   name         String
   subdomain    String   @unique
   customDomain String?  @unique
-  // Set alongside customDomain when a business adds one. PENDING until the
-  // TXT-record ownership check in domains.service.js passes — until then,
-  // resolveBusinessFromHost.js refuses to route traffic for it and Caddy's
-  // on_demand_tls "ask" hook refuses to issue a certificate for it either.
-  customDomainStatus            CustomDomainStatus?
-  customDomainVerificationToken String?
-  customDomainVerifiedAt        DateTime?
   // Fallback only — every real onboarding path (see registerBusiness in
   // auth.service.js, and businesses.service.createLocation) accepts an
   // explicit timezone and only falls through to this default when none is

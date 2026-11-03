@@ -209,8 +209,7 @@ describe('storefront', () => {
     prisma.serviceArea.count.mockResolvedValue(1);
     const out = await widget.getStorefront('biz');
     expect(Object.keys(out.business).sort()).toEqual(['branding', 'currency', 'customDomain', 'defaultLocale', 'hours', 'id', 'legal', 'name', 'phone', 'subdomain', 'timezone']);
-    // customDomain is set on the row but has no VERIFIED status, so it is not routed and must not be published
-    expect(out.business.customDomain).toBeNull();
+    expect(out.business.customDomain).toBe('x.nl');
     expect(out.business.defaultLocale).toBe('nl');
     expect(out.business.phone).toBe('+31 20 123 4567');
     expect(JSON.stringify(out)).not.toContain('acct_secret');
@@ -224,7 +223,7 @@ describe('storefront', () => {
   test('publishes a VERIFIED custom domain and the business default language', async () => {
     prisma.business.findUnique.mockResolvedValue({
       id: 'biz', name: 'Clean Co', subdomain: 'clean', timezone: 'Europe/Amsterdam', currency: 'eur',
-      customDomain: 'schoon.nl', customDomainStatus: 'VERIFIED', defaultLocale: 'en', branding: null, hours: [],
+      customDomain: 'schoon.nl', defaultLocale: 'en', branding: null, hours: [],
     });
     prisma.service.findMany.mockResolvedValue([{ id: 's1' }]);
     prisma.serviceArea.count.mockResolvedValue(1);

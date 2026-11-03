@@ -91,9 +91,8 @@ function toPublicBusiness(business) {
     id: business.id,
     name: business.name,
     subdomain: business.subdomain,
-    // Only a VERIFIED domain: an unverified one is not routed (see
-    // resolveBusinessFromHost.js), so it must not become the canonical URL.
-    customDomain: business.customDomain && business.customDomainStatus === 'VERIFIED' ? business.customDomain : null,
+    // The business's own domain, used as the canonical URL.
+    customDomain: business.customDomain || null,
     defaultLocale: business.defaultLocale || 'nl',
     timezone: business.timezone,
     currency: business.currency,
