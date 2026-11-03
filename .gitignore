@@ -1,0 +1,6 @@
+/.env
+node_modules
+.idea
+logs/
+.DS_Store
+**/.DS_Store

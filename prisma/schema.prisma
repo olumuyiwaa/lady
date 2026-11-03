@@ -1,0 +1,1732 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// AUTH & USERS
+// ============================================================
+
+enum GlobalRole {
+  SUPER_ADMIN
+  PLATFORM_USER // any business-linked or customer user; specific role lives on BusinessMember/CleanerProfile/Customer
+}
+
+enum PreferredPaymentCollection {
+  ONLINE_CARD
+  MANUAL_OFFLINE
+  BOTH
+}
+
+model User {
+  id               String     @id @default(cuid())
+  email            String     @unique
+  phone            String?    @unique
+  passwordHash     String
+  firstName        String
+  lastName         String
+  globalRole       GlobalRole @default(PLATFORM_USER)
+  isEmailVerified  Boolean    @default(false)
+  isActive         Boolean    @default(true)
+  twoFactorEnabled Boolean    @default(false)
+  twoFactorSecret  String?
+  avatarKey        String?
+
+  // Stripe Connect Express account for receiving cleaner payouts. Lives on
+  // User (not CleanerProfile) because it's a person-level identity: a
+  // cleaner who works for two businesses has two CleanerProfile rows (see
+  // the unique([businessId, userId]) note below) but should only ever have
+  // to complete Stripe onboarding once. Both businesses' Payouts pay out to
+  // the same connected account.
+  stripeConnectedAccountId String?   @unique
+  stripeConnectOnboardedAt DateTime?
+  stripePayoutsEnabled     Boolean   @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sessions            Session[]
+  passwordResets      PasswordReset[]
+  otpCodes            OtpCode[]
+  businessMemberships BusinessMember[]
+  cleanerProfiles     CleanerProfile[]
+  auditLogs           AuditLog[]
+
+  @@index([email])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshToken String   @unique
+  // The business workspace this session was issued for. A user with
+  // affiliations to more than one business (e.g. a cleaner working for two
+  // companies) can hold concurrent sessions in different workspaces; refresh
+  // keeps you in the same one instead of re-resolving to "whichever
+  // affiliation happens to come back first".
+  businessId   String?
+  userAgent    String?
+  ipAddress    String?
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+
+  @@index([userId])
+}
+
+model PasswordReset {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+}
+
+model OtpCode {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  code       String
+  purpose    String // EMAIL_VERIFY | LOGIN_2FA | PHONE_VERIFY
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+}
+
+// ============================================================
+// BUSINESS (TENANT)
+// ============================================================
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+}
+
+enum CustomDomainStatus {
+  PENDING
+  VERIFIED
+  FAILED
+}
+
+model Business {
+  id           String   @id @default(cuid())
+  name         String
+  subdomain    String   @unique
+  customDomain String?  @unique
+  // Set alongside customDomain when a business adds one. PENDING until the
+  // TXT-record ownership check in domains.service.js passes — until then,
+  // resolveBusinessFromHost.js refuses to route traffic for it and Caddy's
+  // on_demand_tls "ask" hook refuses to issue a certificate for it either.
+  customDomainStatus            CustomDomainStatus?
+  customDomainVerificationToken String?
+  customDomainVerifiedAt        DateTime?
+  // Fallback only — every real onboarding path (see registerBusiness in
+  // auth.service.js, and businesses.service.createLocation) accepts an
+  // explicit timezone and only falls through to this default when none is
+  // given. Kept as Europe/Amsterdam for historical reasons; not meant to
+  // imply a "primary market" alongside BusinessAddress.country's default
+  // below, which is unrelated and set independently.
+  timezone     String   @default("Europe/Amsterdam")
+  // Language the public storefront shows when the visitor has not picked one
+  // ("nl" | "en"). Without it every first visit was served in the browser's
+  // language, so crawlers (which send none) indexed Dutch businesses in English.
+  defaultLocale String  @default("nl")
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Franchise / multi-location support. Each location is still a full,
+  // independently-scoped tenant (its own cleaners, customers, bookings,
+  // widget subdomain) — nothing about the isolation model above changes.
+  // parentBusinessId only adds a rollup: an ORG_ADMIN member of the parent
+  // can view aggregated reporting and switch between its locations.
+  parentBusinessId String?
+  parentBusiness   Business?  @relation("BusinessLocations", fields: [parentBusinessId], references: [id], onDelete: SetNull)
+  locations        Business[] @relation("BusinessLocations")
+
+  // Stripe Connect — required before this business can accept job-level
+  // customer payments through CleanSera. Money for a paid booking is
+  // transferred to this connected account (minus the platform fee), never
+  // held in CleanSera's own Stripe balance. Subscription billing
+  // (BusinessSubscription below) is unrelated and unaffected by this.
+  stripeConnectedAccountId   String?                    @unique
+  stripeConnectOnboarded     Boolean                    @default(false)
+  stripeChargesEnabled       Boolean                    @default(false)
+  stripePayoutsEnabled       Boolean                    @default(false)
+  // ISO 4217, lower-case. Every customer-facing amount for this business
+  // (checkout, deposits, tips, payouts) is charged in this currency.
+  currency                   String                     @default("eur")
+  preferredPaymentCollection PreferredPaymentCollection @default(BOTH)
+  offlinePaymentInstructions String?                    @db.Text
+
+  // Contact details. contactEmail is PRIVATE: it is where messages from the
+  // public site are delivered and the Reply-To on staff replies, so it must never
+  // appear in a public payload (widget.service.toPublicBusiness is an
+  // allowlist and deliberately omits it). contactPhone is shown on the storefront.
+  contactEmail String?
+  contactPhone String?
+
+  // Invoicing / BTW. Prices in CleanSera are VAT-INCLUSIVE (consumer prices in
+  // NL must be); invoices extract the VAT from the gross amount. Default 21%
+  // is the Dutch standard rate. Required (kvk + vat number) before an invoice
+  // can be issued.
+  legalName  String?
+  kvkNumber  String?
+  vatNumber  String?
+  invoiceIban String?
+  vatRateBps Int     @default(2100)
+
+  invoices       Invoice[]
+  invoiceCounter InvoiceCounter?
+
+  branding             BusinessBranding?
+  addresses            BusinessAddress[]
+  serviceAreas         ServiceArea[]
+  hours                BusinessHours[]
+  members              BusinessMember[]
+  cleaners             CleanerProfile[]
+  calendarFeeds        CalendarFeed[]
+  bookingQuestions     BookingQuestion[]
+  customers            Customer[]
+  services             Service[]
+  bookings             Booking[]
+  recurringSchedules   RecurringSchedule[]
+  reviews              Review[]
+  conversations        Conversation[]
+  notifications        Notification[]
+  subscription         BusinessSubscription?
+  pricing              BusinessPricing?
+  coupons              Coupon[]
+  auditLogs            AuditLog[]
+  ChecklistTemplate    ChecklistTemplate[]
+  supportTickets       SupportTicket[]
+  cleanerDocuments     CleanerDocument[]
+  inventoryItems       InventoryItem[]
+  inventoryLocations   InventoryLocation[]
+  stockMovements       StockMovement[]
+  complianceDocuments  ComplianceDocument[]
+  chemicalTrainingAcks ChemicalTrainingAck[]
+  complianceAudits     ComplianceAudit[]
+
+  // Payroll — commission/rate config per cleaner, the earnings each
+  // completed job generates against that config, and the payout batches
+  // a business uses to mark those earnings as actually paid out.
+  cleanerCompensations CleanerCompensation[]
+  cleanerEarnings      CleanerEarning[]
+  payouts              Payout[]
+  transactions         Transaction[]
+
+  giftCards       GiftCard[]
+  waitlistEntries WaitlistEntry[]
+
+  @@index([subdomain])
+  @@index([parentBusinessId])
+}
+
+model BusinessBranding {
+  id                 String   @id @default(cuid())
+  businessId         String   @unique
+  business           Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  logoKey            String?
+  primaryColor       String?
+  accentColor        String?
+  tagline            String?
+  widgetEmbedEnabled Boolean  @default(true)
+
+  // ---- Public-site content depth (v1 "theme system") ----
+  // A style preset the site template renders differently (type scale,
+  // section framing) — not a full alternate layout, just enough variety
+  // that every business's site doesn't look identical once recolored.
+  // Validated in businesses.service against a small fixed set rather than
+  // an enum, so adding a new preset later never needs a migration.
+  themeStyle       String   @default("MODERN")
+  heroImageKey     String?
+  aboutTitle       String?
+  aboutBody        String?
+  // Each: { name, quote }. Kept as JSON rather than a child table —
+  // there's no need to query into a testimonial independently of its
+  // business, and a business editing "their testimonials" is naturally a
+  // single whole-list save from the settings UI.
+  testimonials     Json?
+  // Each: { question, answer } — reused as-is as FAQPage structured data
+  // on the public site, the same pattern the marketing site's own
+  // /pricing FAQ uses.
+  faqItems         Json?
+  galleryImageKeys String[] @default([])
+  // { facebook?, instagram?, tiktok?, linkedin?, twitter? } — all optional,
+  // validated as URLs in businesses.service.
+  socialLinks      Json?
+  // Which optional sections render on the public site, and in what order.
+  // Hero/Services/HowItWorks/CTA/Footer are structural and always render;
+  // this only controls the optional content sections. A section with no
+  // real content configured (e.g. testimonials: true but an empty
+  // testimonials list) is skipped at render time regardless of this flag,
+  // so toggling one on before filling it in can't publish an empty block.
+  // Shape: { about: bool, testimonials: bool, gallery: bool, faq: bool,
+  // order: string[] (subset/permutation of those four keys) }.
+  sectionsEnabled  Json?
+
+  updatedAt DateTime @updatedAt
+}
+
+model BusinessAddress {
+  id         String   @id @default(cuid())
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  label      String?
+  line1      String
+  line2      String?
+  city       String
+  state      String
+  postalCode String
+  // Fallback only, same caveat as Business.timezone above — a real address
+  // form should always send an explicit country. Not coordinated with that
+  // default (Europe/Amsterdam) or DEFAULT_CURRENCY (usd) in .env.example;
+  // treat all three as independent per-field fallbacks, not a single
+  // "default market."
+  country    String   @default("NL")
+  latitude   Float?
+  longitude  Float?
+  isPrimary  Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  @@index([businessId])
+}
+
+model ServiceArea {
+  id           String   @id @default(cuid())
+  businessId   String
+  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name         String
+  centerLat    Float
+  centerLng    Float
+  radiusMeters Int
+  createdAt    DateTime @default(now())
+
+  @@index([businessId])
+}
+
+model BusinessHours {
+  id         String   @id @default(cuid())
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  dayOfWeek  Int // 0 = Sunday .. 6 = Saturday
+  openTime   String // "08:00"
+  closeTime  String // "18:00"
+  isClosed   Boolean  @default(false)
+
+  @@unique([businessId, dayOfWeek])
+  @@index([businessId])
+}
+
+// Business pricing settings: frequency discounts, coupons, deposit and
+// cancellation policy. All policy fields are nullable/optional — a business
+// that never sets them keeps today's behavior (no deposit required, no
+// cancellation fee ever charged).
+model BusinessPricing {
+  id                 String   @id @default(cuid())
+  businessId         String   @unique
+  business           Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  frequencyDiscounts Json? // { WEEKLY: 0.1, BIWEEKLY: 0.05 }
+
+  // Per-business PER_SQFT / PER_ROOM pricing model rates. Null = fall back
+  // to the platform default in lib/pricing.js (today's hardcoded-for-everyone
+  // behavior). A business in a different market/cost structure sets these
+  // instead of being stuck on the same rate as every other tenant.
+  perSqftCents Int?
+  perRoomCents Int?
+  // perSqftCents is unit-agnostic rate math ("per unit") despite the name —
+  // this just controls what unit the frontend collects from the customer
+  // and labels the quote with. Default SQM since most tenants are NL-based;
+  // set SQFT per-business for markets that expect it.
+  sizeUnit     SizeUnit         @default(SQM)
+
+  // Deposit collected at booking time, before the job is scheduled/assigned.
+  // null depositType = no deposit required (today's behavior).
+  depositType  PolicyValueType?
+  depositValue Int? // percent (0-100) if PERCENT, or cents if AMOUNT
+
+  // Cancellation fee charged when a customer (or staff, on their behalf)
+  // cancels inside cancellationWindowHours of the scheduled start.
+  // null cancellationWindowHours = no fee ever charged (today's behavior),
+  // matching the previous hardcoded free-cancellation-anytime path.
+  cancellationWindowHours Int?
+  cancellationFeeType     PolicyValueType?
+  cancellationFeeValue    Int? // percent (0-100) if PERCENT, or cents if AMOUNT
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+enum PolicyValueType {
+  PERCENT
+  AMOUNT
+}
+
+model Coupon {
+  id                 String    @id @default(cuid())
+  businessId         String
+  business           Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  code               String
+  type               String // PERCENT | AMOUNT
+  value              Int // percent (0-100) or cents
+  isActive           Boolean   @default(true)
+  appliesToServiceId String?
+  expiresAt          DateTime?
+  maxRedemptions     Int?
+  perCustomerLimit   Int?
+  redeemedCount      Int?      @default(0)
+  bookings           Booking[]
+  createdAt          DateTime  @default(now())
+
+  @@unique([businessId, code])
+  @@index([businessId])
+}
+
+// A stored-value gift card issued by a business, optionally purchased by
+// one customer (and addressed to a recipient by email), redeemable against
+// any future booking with that business up to its remaining balance.
+// Unlike Coupon — a reusable discount *rule* — a GiftCard carries an actual
+// balance that's drawn down booking by booking: redeeming $25 of a $75
+// card against one job leaves $50 for next time, which Coupon has no way
+// to express.
+model GiftCard {
+  id                      String    @id @default(cuid())
+  businessId              String
+  business                Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  code                    String
+  initialValueCents       Int
+  balanceCents            Int
+  // Null when a business issues a card directly (comp, promo) rather than
+  // a customer buying one through the widget/portal.
+  purchasedByCustomerId   String?
+  purchasedBy             Customer? @relation("GiftCardPurchasedBy", fields: [purchasedByCustomerId], references: [id])
+  recipientEmail          String?
+  recipientName           String?
+  message                 String?
+  isActive                Boolean   @default(true)
+  expiresAt               DateTime?
+  // Set once the purchase itself has been paid for (as opposed to the
+  // balance being spent later) — null for cards a business issues for free.
+  stripeCheckoutSessionId String?
+  purchasePaidAt          DateTime?
+  createdAt               DateTime  @default(now())
+
+  bookings Booking[]
+
+  @@unique([businessId, code])
+  @@index([businessId])
+}
+
+enum WaitlistStatus {
+  WAITING
+  NOTIFIED
+  CONVERTED
+  EXPIRED
+  CANCELLED
+}
+
+// A customer's request to be notified when a slot opens up for a service
+// in a date range that had no availability at booking time. Created from
+// the public widget when a customer can't find an open slot; drained by
+// bookings.service.cancelBooking and dispatch.service (deleting an
+// assignment frees a cleaner/slot), which check for a matching entry
+// before just letting a freed-up slot go unfilled.
+model WaitlistEntry {
+  id                 String         @id @default(cuid())
+  businessId         String
+  business           Business       @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customerId         String?
+  customer           Customer?      @relation(fields: [customerId], references: [id])
+  // Guest waitlisting — kept alongside customerId so joining the waitlist
+  // from the public widget never forces account creation first.
+  contactName        String?
+  contactEmail       String?
+  contactPhone       String?
+  serviceId          String?
+  service            Service?       @relation(fields: [serviceId], references: [id])
+  desiredStart       DateTime
+  desiredEnd         DateTime
+  notes              String?
+  status             WaitlistStatus @default(WAITING)
+  notifiedAt         DateTime?
+  convertedBookingId String?
+  createdAt          DateTime       @default(now())
+
+  @@index([businessId, status])
+  @@index([businessId, serviceId, desiredStart])
+}
+
+enum BusinessMemberRole {
+  BUSINESS_OWNER
+  BUSINESS_MANAGER
+  // Membership on a *parent* franchise Business (see Business.locations).
+  // Grants the same cross-location reach as BUSINESS_OWNER on that parent,
+  // without being an owner of any individual location. Previously
+  // referenced by scopeToBusiness.js and the /locations and /org-summary
+  // routes but never actually assignable — those code paths were dead.
+  ORG_ADMIN
+}
+
+model BusinessMember {
+  id              String             @id @default(cuid())
+  businessId      String
+  business        Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  userId          String
+  user            User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role            BusinessMemberRole
+  isActive        Boolean            @default(true)
+  // Who sent the invite, for the team list / audit trail. Null for the
+  // owner row created at signup (registerBusiness) — nobody invited them.
+  invitedByUserId String?
+  invitedAt       DateTime           @default(now())
+  joinedAt        DateTime?
+  removedAt       DateTime?
+
+  @@unique([businessId, userId])
+  @@index([businessId])
+}
+
+// ============================================================
+// SUBSCRIPTIONS (CleanSera -> Business billing only)
+// ============================================================
+
+model SubscriptionPlan {
+  id                String  @id @default(cuid())
+  name              String  @unique // Starter | Growth | Pro
+  stripePriceId     String  @unique
+  maxCleaners       Int?
+  monthlyPriceCents Int
+  features          Json?
+  isActive          Boolean @default(true)
+
+  subscriptions BusinessSubscription[]
+}
+
+model BusinessSubscription {
+  id                   String             @id @default(cuid())
+  businessId           String             @unique
+  business             Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  planId               String
+  plan                 SubscriptionPlan   @relation(fields: [planId], references: [id])
+  stripeCustomerId     String             @unique
+  stripeSubscriptionId String?            @unique
+  status               SubscriptionStatus @default(TRIALING)
+  trialEndsAt          DateTime?
+  currentPeriodEnd     DateTime?
+  canceledAt           DateTime?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  invoices PlatformInvoice[]
+}
+
+model PlatformInvoice {
+  id              String               @id @default(cuid())
+  subscriptionId  String
+  subscription    BusinessSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  stripeInvoiceId String               @unique
+  amountCents     Int
+  status          String // paid | open | void | uncollectible
+  issuedAt        DateTime
+  paidAt          DateTime?
+
+  @@index([subscriptionId])
+}
+
+// ============================================================
+// STAFF (CLEANERS) — onboarded/offboarded by their business
+// ============================================================
+
+enum CleanerStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+  OFFBOARDED
+}
+
+/// A secret subscription link (iCalendar) so bookings appear in a person's own
+/// calendar app (Google, Apple, Outlook). Calendar apps cannot send auth
+/// headers, so the link itself is the credential: a random 256-bit token, shown
+/// once, of which only the SHA-256 hash is stored. Revoking sets `revokedAt`.
+enum BookingQuestionType {
+  TEXT
+  LONG_TEXT
+  SELECT
+  MULTI_SELECT
+  YES_NO
+  NUMBER
+}
+
+/// A question a business adds to its own booking form ("Do you have pets?",
+/// "Which floor?"). Answers are copied onto the booking as a snapshot
+/// (Booking.customAnswers) so editing or deleting a question later never
+/// rewrites what a customer was actually asked.
+model BookingQuestion {
+  id         String              @id @default(cuid())
+  businessId String
+  business   Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  label      String
+  helpText   String?
+  type       BookingQuestionType @default(TEXT)
+  // Choices for SELECT / MULTI_SELECT; empty for every other type.
+  options    String[]
+  required   Boolean             @default(false)
+  // Empty = asked for every service; otherwise only for these services.
+  serviceIds String[]
+  sortOrder  Int                 @default(0)
+  isActive   Boolean             @default(true)
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
+
+  @@index([businessId, isActive, sortOrder])
+}
+
+model CalendarFeed {
+  id             String          @id @default(cuid())
+  businessId     String
+  business       Business        @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  // null = every booking of the business (owner/manager); set = that cleaner's own jobs
+  cleanerId      String?
+  cleaner        CleanerProfile? @relation(fields: [cleanerId], references: [id], onDelete: Cascade)
+  // Who created it. A business-wide feed stops working when this person is no
+  // longer an active owner/manager.
+  userId         String
+  label          String?
+  tokenHash      String          @unique
+  lastAccessedAt DateTime?
+  revokedAt      DateTime?
+  createdAt      DateTime        @default(now())
+
+  @@index([businessId, revokedAt])
+  @@index([cleanerId])
+}
+
+model CleanerProfile {
+  id               String        @id @default(cuid())
+  businessId       String
+  business         Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  userId           String
+  user             User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status           CleanerStatus @default(PENDING)
+  hireDate         DateTime?
+  offboardedAt     DateTime?
+  offboardedReason String?
+  serviceAreaIds   String[] // ServiceArea ids this cleaner covers
+  // Which basis the business believes applies to this cleaner. Recorded so
+  // it's visible, not a legal determination — the amount of scheduling/
+  // pricing control a business exercises over a ZZP cleaner is exactly what
+  // Dutch schijnzelfstandigheid enforcement looks at, so this belongs in
+  // front of a NL employment lawyer, not decided by this field alone.
+  employmentType   EmploymentType?
+
+  // Best-known live position, updated on clock-in/clock-out. Used by
+  // dispatch for real proximity ranking instead of inferring location from
+  // wherever the cleaner's last completed job happened to be.
+  lastKnownLat Float?
+  lastKnownLng Float?
+  lastKnownAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  availability CleanerAvailability[]
+  assignments  BookingAssignment[]
+  documents    CleanerDocument[]
+  reviews      Review[]
+  deviceTokens CleanerDeviceToken[]
+  calendarFeeds CalendarFeed[]
+  trainingAcks ChemicalTrainingAck[]
+
+  // Payroll — how this cleaner is paid, what each completed job has earned
+  // them against that rate, and the payout batches settling those earnings.
+  compensation CleanerCompensation?
+  earnings     CleanerEarning[]
+  payouts      Payout[]
+
+  // One profile per person per business — not per person globally. A
+  // cleaner offboarded by Business A can be onboarded fresh by Business B
+  // (or re-onboarded by A) without an email collision.
+  @@unique([businessId, userId])
+  @@index([businessId])
+  @@index([businessId, status])
+  @@index([userId])
+}
+
+// ============================================================
+// PAYROLL — real cleaner earnings & payouts, replacing the client-side
+// "informational only" estimate the cleaner app used to compute.
+// ============================================================
+
+enum CompensationType {
+  PERCENT // value = percent (0-100) of the job's quotedPriceCents
+  FLAT_PER_JOB // value = cents, regardless of job price
+  HOURLY // value = cents per hour, applied to actual clocked duration
+}
+
+// A business sets one compensation rule per cleaner. Optional — a cleaner
+// with no row here simply doesn't accrue earnings yet (nothing computes a
+// number nobody configured).
+model CleanerCompensation {
+  id         String           @id @default(cuid())
+  businessId String
+  business   Business         @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  cleanerId  String           @unique
+  cleaner    CleanerProfile   @relation(fields: [cleanerId], references: [id], onDelete: Cascade)
+  type       CompensationType @default(PERCENT)
+  value      Int
+  updatedAt  DateTime         @updatedAt
+  createdAt  DateTime         @default(now())
+
+  @@index([businessId])
+}
+
+enum EarningStatus {
+  PENDING // completed, not yet included in a payout
+  IN_PAYOUT // included in a Payout that hasn't been marked paid yet
+  PAID // the containing Payout has been marked paid
+  VOIDED // the underlying booking was disputed/refunded after the fact
+}
+
+// One row per (booking, cleaner) pair a cleaner earns against — not per
+// booking, since a job can have more than one assigned cleaner and each of
+// them earns their own share. Snapshots the compensation rule that produced
+// amountCents at the time the job was completed, so a later change to
+// CleanerCompensation never silently reprices earnings that already exist.
+model CleanerEarning {
+  id                String           @id @default(cuid())
+  businessId        String
+  business          Business         @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  cleanerId         String
+  cleaner           CleanerProfile   @relation(fields: [cleanerId], references: [id], onDelete: Cascade)
+  bookingId         String
+  booking           Booking          @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  amountCents       Int
+  compensationType  CompensationType
+  compensationValue Int
+  status            EarningStatus    @default(PENDING)
+  payoutId          String?
+  payout            Payout?          @relation(fields: [payoutId], references: [id], onDelete: SetNull)
+  earnedAt          DateTime         @default(now())
+
+  @@unique([bookingId, cleanerId])
+  @@index([businessId])
+  @@index([cleanerId])
+  @@index([cleanerId, status])
+}
+
+enum PayoutStatus {
+  PENDING
+  PAID
+  CANCELED
+}
+
+// A batch of a single cleaner's PENDING earnings over a period, created by
+// the business and then marked PAID either manually (bank transfer, cash,
+// their own payroll run) or, when the cleaner has completed Stripe Connect
+// onboarding, automatically via a Stripe transfer straight to the cleaner's
+// connected account — see payroll.service.payViaStripe.
+model Payout {
+  id               String         @id @default(cuid())
+  businessId       String
+  business         Business       @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  cleanerId        String
+  cleaner          CleanerProfile @relation(fields: [cleanerId], references: [id], onDelete: Cascade)
+  periodStart      DateTime
+  periodEnd        DateTime
+  totalCents       Int
+  status           PayoutStatus   @default(PENDING)
+  method           String? // MANUAL_CASH | MANUAL_TRANSFER | STRIPE | OTHER
+  reference        String?
+  // Set only when method = STRIPE. The Stripe Transfer id moving funds from
+  // the business's own connected account balance to the cleaner's connected
+  // account — see stripeClient.payCleanerTransfer for why it's scoped that
+  // way rather than off the platform's balance.
+  stripeTransferId String?
+  paidAt           DateTime?
+  createdBy        String?
+  createdAt        DateTime       @default(now())
+
+  earnings CleanerEarning[]
+
+  @@index([businessId])
+  @@index([cleanerId])
+  @@index([businessId, status])
+}
+
+// FCM registration token for the cleaner mobile app, so the backend can push
+// "you've been assigned a new job" / schedule-change notifications straight
+// to the cleaner's phone instead of relying on them opening the app.
+// Multiple rows per cleaner is expected (one per installed device).
+model CleanerDeviceToken {
+  id         String         @id @default(cuid())
+  cleanerId  String
+  cleaner    CleanerProfile @relation(fields: [cleanerId], references: [id], onDelete: Cascade)
+  token      String
+  platform   String? // "ios" | "android"
+  createdAt  DateTime       @default(now())
+  lastSeenAt DateTime       @default(now())
+
+  @@unique([cleanerId, token])
+  @@index([cleanerId])
+}
+
+model CleanerAvailability {
+  id        String         @id @default(cuid())
+  cleanerId String
+  cleaner   CleanerProfile @relation(fields: [cleanerId], references: [id], onDelete: Cascade)
+  dayOfWeek Int
+  startTime String
+  endTime   String
+
+  @@index([cleanerId])
+}
+
+// ============================================================
+// CUSTOMERS (business-scoped CRM — separate record per business)
+// ============================================================
+
+model Customer {
+  invoices Invoice[]
+  id           String   @id @default(cuid())
+  businessId   String
+  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  firstName    String
+  lastName     String
+  email        String?
+  phone        String
+  notes        String?
+  // Shareable code for referral-a-friend. Generated lazily (see
+  // customers.service.js ensureReferralCode) rather than at every insert
+  // site, the same lazy-assignment pattern this codebase already uses for
+  // checklist item ids — existing customers created before this feature
+  // just get one the first time they're read.
+  referralCode String?  @unique
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Set on the connected account (per business, not platform-wide) after
+  // the customer's first successful Checkout payment with
+  // setup_future_usage: 'off_session' — see stripeClient.chargeSavedPaymentMethod.
+  // Lets recurring jobs auto-charge instead of requiring a fresh iDEAL
+  // redirect for every single visit.
+  stripeCustomerId       String?
+  defaultPaymentMethodId String?
+
+  addresses          CustomerAddress[]
+  bookings           Booking[]
+  recurringSchedules RecurringSchedule[]
+  reviews            Review[]
+  giftCardsPurchased GiftCard[]          @relation("GiftCardPurchasedBy")
+  waitlistEntries    WaitlistEntry[]
+
+  @@unique([businessId, phone])
+  @@index([businessId])
+}
+
+model CustomerAddress {
+  id         String   @id @default(cuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  label      String?
+  line1      String
+  line2      String?
+  city       String
+  state      String
+  postalCode String
+  latitude   Float?
+  longitude  Float?
+  isPrimary  Boolean  @default(false)
+
+  // Standing site info for this address — the things a cleaner needs on
+  // every visit regardless of which specific booking it is. Kept here
+  // (rather than only on Booking) so it's entered once and can be copied
+  // onto each new booking/recurring job made against this address, instead
+  // of the customer or dispatcher re-typing it every time.
+  accessCode          String?
+  keyLocation         String?
+  parkingInstructions String?
+  petNotes            String?
+  specialInstructions String?
+
+  recurringSchedules RecurringSchedule[]
+
+  @@index([customerId])
+}
+
+// ============================================================
+// CATALOG
+// ============================================================
+
+enum PricingModel {
+  FLAT
+  PER_SQFT
+  PER_ROOM
+  HOURLY
+}
+
+enum SizeUnit {
+  SQM
+  SQFT
+}
+
+model Service {
+  id               String       @id @default(cuid())
+  businessId       String
+  business         Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name             String // Standard Clean, Deep Clean, Move-Out Clean, etc.
+  description      String?
+  pricingModel     PricingModel @default(FLAT)
+  basePriceCents   Int
+  estimatedMinutes Int
+  isActive         Boolean      @default(true)
+  createdAt        DateTime     @default(now())
+  // Overrides Business.vatRateBps for this service (e.g. 900 = 9%). Null = use the business default.
+  vatRateBps       Int?
+
+  addOns             ServiceAddOn[]
+  bookings           Booking[]
+  recurringSchedules RecurringSchedule[]
+  waitlistEntries    WaitlistEntry[]
+
+  @@index([businessId])
+}
+
+model ServiceAddOn {
+  id           String  @id @default(cuid())
+  serviceId    String
+  service      Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  name         String // e.g. "Inside fridge", "Inside oven", "Windows"
+  priceCents   Int
+  extraMinutes Int     @default(0)
+
+  @@index([serviceId])
+}
+
+// ============================================================
+// BOOKINGS
+// ============================================================
+
+enum BookingStatus {
+  REQUESTED
+  CONFIRMED
+  ASSIGNED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  UNPAID
+  DEPOSIT_PAID
+  PAID
+  PARTIAL
+  REFUNDED
+  FAILED
+}
+
+enum RecurrenceFrequency {
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
+}
+
+// ACTIVE: generating bookings on schedule.
+// PAUSED: temporarily suspended by the business/customer; can be resumed.
+// CANCELLED: terminal state; can never be resumed (a new schedule must be
+// created instead). Replaces the old single `isActive` boolean, which could
+// not tell "paused" and "cancelled" apart, so resuming a cancelled schedule
+// was indistinguishable from resuming a paused one.
+enum RecurringScheduleStatus {
+  ACTIVE
+  PAUSED
+  CANCELLED
+}
+
+model RecurringSchedule {
+  id                String                  @id @default(cuid())
+  businessId        String
+  business          Business                @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customerId        String
+  customer          Customer                @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  serviceId         String
+  service           Service                 @relation(fields: [serviceId], references: [id])
+  customerAddressId String?
+  customerAddress   CustomerAddress?        @relation(fields: [customerAddressId], references: [id])
+  frequency         RecurrenceFrequency
+  dayOfWeek         Int
+  startTime         String
+  status            RecurringScheduleStatus @default(ACTIVE)
+  nextRunDate       DateTime
+  createdAt         DateTime                @default(now())
+
+  bookings Booking[]
+
+  @@index([businessId])
+  @@index([status, nextRunDate])
+}
+
+model Booking {
+  invoice Invoice?
+  id                      String             @id @default(cuid())
+  businessId              String
+  business                Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customerId              String
+  customer                Customer           @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  serviceId               String
+  service                 Service            @relation(fields: [serviceId], references: [id])
+  recurringScheduleId     String?
+  recurringSchedule       RecurringSchedule? @relation(fields: [recurringScheduleId], references: [id])
+  addressLine1            String
+  addressLine2            String?
+  city                    String
+  state                   String                  @default("")
+  postalCode              String?
+  latitude                Float?
+  longitude               Float?
+  // Job-site info for this specific visit — copied from CustomerAddress at
+  // booking time when the booking was made against a saved address (same
+  // "freeze it on the booking" pattern as addressLine1/city/state above),
+  // or entered directly for a one-off/widget booking with no saved address.
+  // Kept editable per booking so a one-time addendum ("dog is at the vet
+  // this week") doesn't require overwriting the address's standing notes.
+  accessCode              String?
+  keyLocation             String?
+  parkingInstructions     String?
+  petNotes                String?
+  specialInstructions     String?
+  // Snapshot of the business's custom booking questions as answered: [{ questionId, label, type, value }]
+  customAnswers           Json?
+
+  // What the customer chose in the booking form, frozen at booking time so
+  // the business and the cleaner can see it and later price/catalogue edits
+  // do not rewrite history. addOns: [{id,name,priceCents,extraMinutes}];
+  // homeDetails: {rooms,bathrooms,sqft,frequency}.
+  addOns                  Json?
+  homeDetails             Json?
+
+  // Dutch consumer law: T&C acceptance must be recorded, and a service
+  // booked to start inside the 14-day cooling-off period needs the
+  // customer's explicit consent to that early start, separate from just
+  // accepting the T&C.
+  termsAcceptedAt        DateTime?
+  earlyStartConsentGiven Boolean   @default(false)
+  scheduledStart          DateTime
+  scheduledEnd            DateTime
+  status                  BookingStatus      @default(REQUESTED)
+  quotedPriceCents        Int
+  couponId                String?
+  coupon                  Coupon?            @relation(fields: [couponId], references: [id])
+  // Independent of couponId — a booking can use a coupon and a gift card
+  // together (coupon lowers the price, gift card pays some/all of what's
+  // left). giftCardAppliedCents is capped at the card's balance at
+  // redemption time; the balance itself is decremented on the GiftCard row.
+  giftCardId              String?
+  giftCard                GiftCard?          @relation(fields: [giftCardId], references: [id])
+  giftCardAppliedCents    Int?
+  // Set when this booking was placed using another customer's referral
+  // code. Kept even though the discount itself is just baked into
+  // quotedPriceCents, purely so "referrals converted" is reportable later
+  // without re-deriving it from notification logs.
+  referredByCustomerId    String?
+  // Bookkeeping only — CleanSera does not process this payment
+  paymentStatus           PaymentStatus      @default(UNPAID)
+  stripeCheckoutSessionId String?
+  stripePaymentIntentId   String?
+  amountPaidCents         Int?
+  autoChargeOnComplete    Boolean            @default(false)
+  paymentNote             String?
+  cancelReason            String?
+  reminderSentAt          DateTime?
+
+  // Deposit — collected at booking submission time when the business has a
+  // deposit policy configured (BusinessPricing.depositType). Independent of
+  // paymentStatus/amountPaidCents, which track the remaining/full job charge.
+  depositRequiredCents         Int?
+  depositPaidAt                DateTime?
+  stripeDepositSessionId       String?
+  stripeDepositPaymentIntentId String?
+
+  // Tip — collected from the customer portal after the job is COMPLETED.
+  tipAmountCents           Int?
+  tipPaidAt                DateTime?
+  stripeTipSessionId       String?
+  stripeTipPaymentIntentId String?
+
+  // Set when cancelBooking applies BusinessPricing's cancellation policy.
+  // Null if the cancellation was free (outside the window, or no policy set).
+  cancellationFeeCents Int?
+
+  // Refund of a prior deposit/job payment, issued automatically on
+  // cancellation when the fee is less than what was already paid.
+  refundedAmountCents Int?
+  refundedAt          DateTime?
+  stripeRefundId      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  assignments     BookingAssignment[]
+  checklist       JobChecklist?
+  photos          JobPhoto[]
+  review          Review?
+  inventoryUsages JobInventoryUsage[]
+  cleanerEarnings CleanerEarning[]
+
+  // Prevents the recurring daemon from double-creating a booking for the
+  // same schedule + slot if it runs twice (two replicas, a retried tick,
+  // etc). recurringScheduleId is null for one-off bookings, and Postgres
+  // allows multiple NULLs through a unique index, so this only constrains
+  // actual recurring-generated bookings.
+  @@unique([recurringScheduleId, scheduledStart])
+  @@index([businessId])
+  @@index([businessId, status])
+  @@index([businessId, scheduledStart])
+  @@index([paymentStatus])
+}
+
+model BookingAssignment {
+  id                   String         @id @default(cuid())
+  bookingId            String
+  booking              Booking        @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  cleanerId            String
+  cleaner              CleanerProfile @relation(fields: [cleanerId], references: [id])
+  assignedAt           DateTime       @default(now())
+  // Marks the point of contact for a multi-cleaner job — the one who gets
+  // "on my way"/arrival notifications sent under their name to the
+  // customer, and who the app can badge as lead on a team job. Meaningless
+  // (and ignored) on a single-cleaner booking.
+  isTeamLead           Boolean        @default(false)
+  // This cleaner's share, as a whole-number percent (0-100), of the
+  // PERCENT-type earnings pool for this booking — see
+  // payroll.service.js#computeEarningsForBooking. Null means "split the
+  // pool evenly among this booking's assignments that don't have an
+  // explicit share set", so a solo booking (the overwhelming majority)
+  // behaves exactly as before this field existed: one assignment, nothing
+  // to split. Only matters for PERCENT-type compensation — HOURLY and
+  // FLAT_PER_JOB are already inherently per-person and are never scaled by
+  // this.
+  earningsSplitPercent Int?
+  // Set when the cleaner taps "On my way" in the app — triggers an SMS/email
+  // to the customer. Nullable/repeatable (not a strict state machine field)
+  // since a cleaner might tap it, get delayed, and the business may want to
+  // allow a re-send; the notification itself is what matters, this is just
+  // an audit/idempotency timestamp of the most recent send.
+  onMyWayAt            DateTime?
+  checkedInAt          DateTime?
+  checkedOutAt         DateTime?
+  checkInLat           Float?
+  checkInLng           Float?
+
+  @@index([bookingId])
+  @@index([cleanerId])
+}
+
+// ============================================================
+// QUALITY / CHECKLISTS
+// ============================================================
+
+model JobChecklist {
+  id          String    @id @default(cuid())
+  bookingId   String    @unique
+  booking     Booking   @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  items       Json // [{ label, done }]
+  completedAt DateTime?
+}
+
+model ChecklistTemplate {
+  id         String   @id @default(cuid())
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name       String
+  items      Json
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([businessId])
+}
+
+model JobPhoto {
+  id         String   @id @default(cuid())
+  bookingId  String
+  booking    Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  stage      String // BEFORE | AFTER
+  storageKey String
+  uploadedAt DateTime @default(now())
+
+  @@index([bookingId])
+}
+
+// ============================================================
+// REVIEWS
+// ============================================================
+
+model Review {
+  id         String          @id @default(cuid())
+  businessId String
+  business   Business        @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  bookingId  String          @unique
+  booking    Booking         @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  customerId String
+  customer   Customer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  // Backfilled from the booking's primary assignment at review time. Nullable
+  // because a booking can in principle be reviewed with no assignment on
+  // record (e.g. data imported from elsewhere) — never block a review over it.
+  cleanerId  String?
+  cleaner    CleanerProfile? @relation(fields: [cleanerId], references: [id], onDelete: SetNull)
+  rating     Int // 1-5
+  comment    String?
+  createdAt  DateTime        @default(now())
+
+  @@index([businessId])
+  @@index([cleanerId])
+}
+
+// ============================================================
+// MESSAGING
+// ============================================================
+
+model Conversation {
+  id          String   @id @default(cuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  subjectType String // CLEANER | CUSTOMER
+  subjectId   String // CleanerProfile.id or Customer.id
+  createdAt   DateTime @default(now())
+
+  messages Message[]
+
+  @@index([businessId])
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderUserId   String
+  body           String?
+  attachmentKey  String?
+  readAt         DateTime?
+  createdAt      DateTime     @default(now())
+
+  @@index([conversationId])
+}
+
+// ============================================================
+// NOTIFICATIONS
+// ============================================================
+
+model Notification {
+  id              String   @id @default(cuid())
+  businessId      String
+  business        Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  recipientUserId String
+  type            String // BOOKING_CONFIRMED | REMINDER | EN_ROUTE | COMPLETED | REVIEW_REQUEST | ...
+  title           String
+  body            String
+  isRead          Boolean  @default(false)
+  createdAt       DateTime @default(now())
+
+  @@index([businessId])
+  @@index([recipientUserId])
+}
+
+// ============================================================
+// AUDIT
+// ============================================================
+
+model AuditLog {
+  id          String    @id @default(cuid())
+  businessId  String?
+  business    Business? @relation(fields: [businessId], references: [id], onDelete: SetNull)
+  actorUserId String?
+  actor       User?     @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+  action      String
+  entityType  String
+  entityId    String
+  metadata    Json?
+  createdAt   DateTime  @default(now())
+
+  @@index([businessId])
+}
+
+// ============================================================
+// CLEANER DOCUMENTS
+// ============================================================
+
+enum EmploymentType {
+  EMPLOYEE
+  ZZP
+}
+
+enum DocumentType {
+  ID_CARD
+  BACKGROUND_CHECK
+  VOG // Verklaring Omtrent het Gedrag — the standard NL conduct certificate;
+  // BACKGROUND_CHECK alone doesn't say what was actually screened.
+  RIGHT_TO_WORK
+  CERTIFICATION
+  CONTRACT
+  INSURANCE
+  OTHER
+}
+
+model CleanerDocument {
+  id         String         @id @default(cuid())
+  businessId String
+  business   Business       @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  cleanerId  String
+  cleaner    CleanerProfile @relation(fields: [cleanerId], references: [id], onDelete: Cascade)
+  type       DocumentType   @default(OTHER)
+  title      String
+  storageKey String
+  mimeType   String?
+  fileSize   Int?
+  expiresAt  DateTime?
+  notes      String?
+  uploadedBy String?
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  @@index([businessId])
+  @@index([cleanerId])
+}
+
+// ============================================================
+// SUPPORT TICKETS
+// ============================================================
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING_ON_CUSTOMER
+  RESOLVED
+  CLOSED
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+model SupportTicket {
+  id          String         @id @default(cuid())
+  businessId  String
+  business    Business       @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  subject     String
+  description String
+  status      TicketStatus   @default(OPEN)
+  priority    TicketPriority @default(MEDIUM)
+  category    String?
+  customerId  String?
+  bookingId   String?
+  assignedTo  String?
+  createdBy   String?
+  // Who to reply to. Filled for tickets that arrive from the public site's
+  // contact form (a visitor, not a signed-in customer) and for staff-created
+  // tickets where an email is entered. Replies are sent to contactEmail.
+  contactName  String?
+  contactEmail String?
+  contactPhone String?
+  // 'WEBSITE' for the public contact form, null when staff created it.
+  source       String?
+  resolvedAt  DateTime?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  messages SupportTicketMessage[]
+
+  @@index([businessId])
+  @@index([businessId, status])
+}
+
+model SupportTicketMessage {
+  id         String        @id @default(cuid())
+  ticketId   String
+  ticket     SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  authorId   String?
+  body       String
+  isInternal Boolean       @default(false)
+  // Set only when the reply was actually handed to the mail provider. Null for
+  // internal notes, for tickets with no contact email, and when email is not
+  // configured or failed - the UI shows that state instead of claiming delivery.
+  emailedAt  DateTime?
+  createdAt  DateTime      @default(now())
+
+  @@index([ticketId])
+}
+
+// Messages sent to CleanSera itself from the marketing site (support form and
+// demo / contact request). Platform-level, so deliberately not tied to a
+// business. Strings rather than enums so a new kind or status needs no migration:
+// kind: SUPPORT | DEMO     status: NEW | IN_PROGRESS | RESOLVED | SPAM
+model PlatformInquiry {
+  id         String    @id @default(cuid())
+  reference  String    @unique
+  kind       String
+  name       String
+  email      String
+  company    String?
+  phone      String?
+  subject    String?
+  category   String?
+  message    String?   @db.Text
+  source     String?
+  status     String    @default("NEW")
+  handledBy  String?
+  notifiedAt DateTime?
+  ackSentAt  DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([status, createdAt])
+  @@index([kind, createdAt])
+}
+
+// ============================================================
+// INVENTORY
+// ============================================================
+
+enum InventoryItemType {
+  SUPPLY
+  CHEMICAL
+  EQUIPMENT
+  PPE
+  OTHER
+}
+
+enum StockMovementType {
+  PURCHASE
+  ADJUSTMENT
+  USAGE
+  TRANSFER
+  RETURN
+  WRITE_OFF
+}
+
+model InventoryItem {
+  id              String            @id @default(cuid())
+  businessId      String
+  business        Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name            String
+  sku             String?
+  type            InventoryItemType @default(SUPPLY)
+  description     String?
+  unit            String            @default("each")
+  reorderPoint    Int?
+  reorderQuantity Int?
+  isActive        Boolean           @default(true)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  isHazardous  Boolean             @default(false)
+  manufacturer String?
+  casNumber    String?
+  hazardClass  String?
+  sdsId        String?
+  sds          ComplianceDocument? @relation("CurrentSds", fields: [sdsId], references: [id])
+
+  stockLevels InventoryStock[]
+  movements   StockMovement[]
+  jobUsages   JobInventoryUsage[]
+
+  @@unique([businessId, sku])
+  @@index([businessId])
+  @@index([businessId, type])
+  @@index([businessId, isActive])
+}
+
+model InventoryLocation {
+  id         String   @id @default(cuid())
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name       String
+  type       String   @default("WAREHOUSE")
+  address    String?
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  stockLevels   InventoryStock[]
+  movementsFrom StockMovement[]  @relation("FromLocation")
+  movementsTo   StockMovement[]  @relation("ToLocation")
+
+  @@index([businessId])
+}
+
+model InventoryStock {
+  id         String            @id @default(cuid())
+  itemId     String
+  item       InventoryItem     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  locationId String
+  location   InventoryLocation @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  quantity   Int               @default(0)
+  updatedAt  DateTime          @updatedAt
+
+  @@unique([itemId, locationId])
+  @@index([itemId])
+  @@index([locationId])
+}
+
+model StockMovement {
+  id             String             @id @default(cuid())
+  businessId     String
+  business       Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  itemId         String
+  item           InventoryItem      @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  type           StockMovementType
+  quantity       Int
+  fromLocationId String?
+  fromLocation   InventoryLocation? @relation("FromLocation", fields: [fromLocationId], references: [id])
+  toLocationId   String?
+  toLocation     InventoryLocation? @relation("ToLocation", fields: [toLocationId], references: [id])
+  bookingId      String?
+  notes          String?
+  performedById  String?
+  createdAt      DateTime           @default(now())
+
+  @@index([businessId])
+  @@index([itemId])
+  @@index([bookingId])
+  @@index([createdAt])
+}
+
+model JobInventoryUsage {
+  id         String        @id @default(cuid())
+  bookingId  String
+  booking    Booking       @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  itemId     String
+  item       InventoryItem @relation(fields: [itemId], references: [id])
+  quantity   Int
+  notes      String?
+  recordedBy String?
+  createdAt  DateTime      @default(now())
+
+  @@index([bookingId])
+  @@index([itemId])
+}
+
+// ============================================================
+// COMPLIANCE
+// ============================================================
+
+enum ComplianceDocType {
+  SDS
+  RISK_ASSESSMENT
+  COSHH_ASSESSMENT
+  TRAINING_RECORD
+  INSPECTION_REPORT
+  CERTIFICATE
+  OTHER
+}
+
+model ComplianceDocument {
+  id           String            @id @default(cuid())
+  businessId   String
+  business     Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  type         ComplianceDocType @default(SDS)
+  title        String
+  storageKey   String
+  mimeType     String?
+  fileSize     Int?
+  version      String?
+  effectiveAt  DateTime?
+  expiresAt    DateTime?
+  notes        String?
+  uploadedById String?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  inventoryItems InventoryItem[] @relation("CurrentSds")
+
+  @@index([businessId])
+  @@index([businessId, type])
+  @@index([expiresAt])
+}
+
+model ChemicalTrainingAck {
+  id             String         @id @default(cuid())
+  businessId     String
+  business       Business       @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  cleanerId      String
+  cleaner        CleanerProfile @relation(fields: [cleanerId], references: [id], onDelete: Cascade)
+  documentId     String
+  acknowledgedAt DateTime       @default(now())
+  notes          String?
+
+  @@unique([cleanerId, documentId])
+  @@index([businessId])
+  @@index([cleanerId])
+}
+
+model ComplianceAudit {
+  id          String   @id @default(cuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  title       String
+  type        String
+  status      String   @default("OPEN")
+  findings    Json?
+  score       Int?
+  conductedAt DateTime
+  conductedBy String?
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([businessId])
+  @@index([businessId, status])
+}
+
+// ── Invoices (customer-facing, BTW) ─────────────────────────────────────────
+// One invoice per booking. Numbers are consecutive per business (Dutch tax
+// rules require a gapless sequence) and issued invoices are never edited or
+// deleted: corrections are made with a credit note. Both relations are
+// RESTRICT so a booking/customer with an invoice cannot be deleted (fiscal
+// retention: 7 years).
+model Invoice {
+  id         String   @id @default(cuid())
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  bookingId  String   @unique
+  booking    Booking  @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+
+  sequence Int
+  number   String
+
+  currency   String
+  vatRateBps Int
+  netCents   Int
+  vatCents   Int
+  grossCents Int
+
+  // Snapshots taken at issue time so later edits to the business/customer
+  // never change an issued invoice.
+  supplier Json
+  customerSnapshot Json
+  lines    Json
+
+  issuedAt  DateTime  @default(now())
+  dueAt     DateTime?
+  paidAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@unique([businessId, sequence])
+  @@unique([businessId, number])
+  @@index([businessId, issuedAt])
+  @@index([customerId])
+}
+
+model InvoiceCounter {
+  businessId   String   @id
+  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  lastSequence Int      @default(0)
+}
+
+// ───────────────────────────────────────────────────────────────────────
+// Transaction log
+//
+// One row per money event, written when the event happens (Stripe webhook,
+// a payment recorded by hand, a refund, a payout). Before this table the
+// money lived in scattered Booking/Payout/PlatformInvoice columns that hold a
+// single value each and have no date for the main job payment, so a dated,
+// per-event history could not be rebuilt from them.
+//
+// Rows are append-only except `status`, which moves for the two events that
+// settle later (a dispute, a subscription invoice that fails and is retried).
+// Related ids are plain strings, not foreign keys, so the record survives the
+// booking, customer or cleaner being deleted. `description` and
+// `counterpartyName` are snapshots for the same reason.
+// ───────────────────────────────────────────────────────────────────────
+
+enum TransactionType {
+  BOOKING_PAYMENT // a customer paying for a job (Stripe link, or recorded by hand)
+  DEPOSIT
+  TIP
+  REFUND
+  DISPUTE
+  CLEANER_PAYOUT
+  SUBSCRIPTION // the business paying CleanSera
+}
+
+// Relative to the business: IN = money received, OUT = money paid or returned.
+enum TransactionDirection {
+  IN
+  OUT
+}
+
+enum TransactionStatus {
+  SUCCEEDED
+  PENDING // e.g. a dispute that is still open
+  FAILED
+  REVERSED // e.g. a dispute the business won
+}
+
+enum TransactionMethod {
+  STRIPE
+  CASH
+  BANK_TRANSFER
+  INVOICE
+  OTHER
+}
+
+model Transaction {
+  id         String               @id @default(cuid())
+  businessId String
+  business   Business             @relation(fields: [businessId], references: [id], onDelete: Restrict)
+
+  type      TransactionType
+  direction TransactionDirection
+  status    TransactionStatus    @default(SUCCEEDED)
+  method    TransactionMethod    @default(STRIPE)
+
+  // Always positive; `direction` carries the sign.
+  amountCents Int
+  currency    String   @default("EUR")
+  // When the money moved (not when the row was written).
+  occurredAt  DateTime
+
+  description      String?
+  counterpartyName String? // customer, cleaner or "CleanSera", as it read at the time
+  reference        String? // free text from whoever recorded it (bank reference, invoice no.)
+
+  bookingId         String?
+  customerId        String?
+  cleanerId         String?
+  payoutId          String?
+  platformInvoiceId String?
+
+  stripePaymentIntentId String?
+  stripeRefundId        String?
+  stripeTransferId      String?
+  stripeInvoiceId       String?
+  stripeDisputeId       String?
+
+  // Makes recording idempotent: webhooks are delivered more than once, and the
+  // same event can reach us by two routes (our own refund and Stripe's
+  // refund.created). e.g. "deposit:<bookingId>", "refund:<stripeRefundId>".
+  dedupeKey  String   @unique
+  // Written by scripts/backfillTransactions.js from older data; the date of a
+  // job payment is then approximate (see metadata.dateApproximate).
+  backfilled Boolean  @default(false)
+  metadata   Json?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([businessId, occurredAt(sort: Desc)])
+  @@index([businessId, type, occurredAt(sort: Desc)])
+  @@index([occurredAt(sort: Desc)])
+  @@index([bookingId])
+  @@index([stripePaymentIntentId])
+}
