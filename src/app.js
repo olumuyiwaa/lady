@@ -70,9 +70,49 @@ app.use(helmet({
     // or keep CSP and only disable it for /api-docs if you prefer
 }));
 
+// CORS — allow only the configured frontend origin (and the booking widget
+// embed domain if set). The Stripe webhook endpoint is raw bytes and does not
+// go through this middleware. Tokens travel as Authorization headers, not
+// cookies, so credentials:true / SameSite restrictions are not relevant here,
+// but there is still no reason to let arbitrary origins read API responses.
+const allowedOrigins = (() => {
+    const origins = new Set();
+    if (process.env.FRONTEND_URL) {
+        // Support a comma-separated list for staging/preview environments.
+        process.env.FRONTEND_URL.split(',').map(u => u.trim()).filter(Boolean).forEach(u => origins.add(u));
+    }
+    if (process.env.WIDGET_BASE_DOMAIN) {
+        // The embeddable booking widget may be loaded from the tenant's own
+        // domain. We can't enumerate every subdomain at startup, so accept
+        // any subdomain of WIDGET_BASE_DOMAIN (the embed.js does a postMessage
+        // handshake as an extra layer of protection).
+        origins.add(`*.${process.env.WIDGET_BASE_DOMAIN}`);
+    }
+    // Always allow localhost in development so the dev server works without
+    // having to set FRONTEND_URL.
+    if (process.env.NODE_ENV !== 'production') {
+        origins.add('http://localhost:3000');
+        origins.add('http://localhost:3001');
+    }
+    return [...origins];
+})();
+
 app.use(
     cors({
-        origin: true,
+        origin(origin, callback) {
+            // Non-browser requests (curl, server-to-server, Stripe webhooks
+            // handled before this middleware) have no Origin header.
+            if (!origin) return callback(null, true);
+            const allowed = allowedOrigins.some(pattern => {
+                if (pattern.startsWith('*.')) {
+                    const base = pattern.slice(2);
+                    return origin.endsWith(`.${base}`) || origin === `https://${base}` || origin === `http://${base}`;
+                }
+                return origin === pattern;
+            });
+            if (allowed) return callback(null, true);
+            callback(new Error(`CORS: origin "${origin}" is not allowed`));
+        },
         credentials: false,
     })
 );
