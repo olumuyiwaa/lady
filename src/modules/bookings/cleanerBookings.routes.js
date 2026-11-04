@@ -13,6 +13,8 @@
  *   POST /cleaner/bookings/:id/start
  *   POST /cleaner/bookings/:id/complete  { lat?, lng?, notes? }
  *   POST /cleaner/bookings/:id/on-my-way
+ *   GET  /cleaner/bookings/:id/messages?after=
+ *   POST /cleaner/bookings/:id/messages           { body }
  *   POST /cleaner/bookings/:id/photos/upload-url  { stage, contentType?, filename? }
  *   POST /cleaner/bookings/:id/photos             { stage, storageKey }
  */
@@ -259,6 +261,37 @@ router.post('/:id/on-my-way', async (req, res, next) => {
     next(err);
   }
 });
+
+/**
+ * GET  /bookings/:id/messages?after=<ISO>   chat with the customer for this job
+ * POST /bookings/:id/messages               { body }
+ * Only for jobs the cleaner is assigned to (see modules/bookingChat).
+ */
+const bookingChat = require('../bookingChat/bookingChat.service');
+const chatParty = (req) => ({ type: 'CLEANER', cleanerId: req.cleaner.id, userId: req.user.id });
+
+router.get('/:id/messages', async (req, res, next) => {
+  try {
+    const data = await bookingChat.listMessages(req.businessId, req.params.id, chatParty(req), { after: req.query.after });
+    return success(res, 200, data);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post(
+  '/:id/messages',
+  [body('body').isString().trim().isLength({ min: 1, max: bookingChat.MAX_MESSAGE_LENGTH })],
+  validate,
+  async (req, res, next) => {
+    try {
+      const data = await bookingChat.postMessage(req.businessId, req.params.id, chatParty(req), req.body);
+      return success(res, 201, data);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
 
 /**
  * POST /bookings/:id/photos/upload-url

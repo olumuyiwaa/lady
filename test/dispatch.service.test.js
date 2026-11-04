@@ -3,6 +3,7 @@ jest.mock('../src/config/database.js', () => ({
   cleanerProfile: { findFirst: jest.fn(), findUnique: jest.fn() },
   bookingAssignment: { create: jest.fn(), findMany: jest.fn(), findFirst: jest.fn().mockResolvedValue(null), count: jest.fn(), delete: jest.fn() },
   businessSubscription: { findUnique: jest.fn() },
+  customer: { findUnique: jest.fn() },
 }));
 jest.mock('../src/utils/audit', () => ({ audit: jest.fn() }));
 jest.mock('../src/config/logger', () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn() }));
@@ -90,5 +91,42 @@ describe('dispatch.service.createAssignment', () => {
 
     expect(result.cleanerId).toBe('cleaner-x');
     expect(scheduler.findAvailableCleaners).not.toHaveBeenCalled();
+  });
+});
+
+describe('dispatch: customer preferred cleaner', () => {
+  const booking = {
+    id: 'bk1', customerId: 'cust1', status: 'CONFIRMED',
+    scheduledStart: new Date('2026-01-01T10:00:00Z'), scheduledEnd: new Date('2026-01-01T12:00:00Z'),
+    latitude: 1, longitude: 2,
+  };
+  const candidates = [
+    { cleaner: { id: 'cleaner-best' }, distanceMeters: 500, etaSeconds: 300, workload: 2 },
+    { cleaner: { id: 'cleaner-fav' }, distanceMeters: 5000, etaSeconds: 900, workload: 1 },
+  ];
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockPrisma.booking.findFirst.mockResolvedValue(booking);
+    mockPrisma.bookingAssignment.findMany.mockResolvedValue([]);
+    scheduler.findAvailableCleaners.mockResolvedValue(candidates);
+    mockPrisma.bookingAssignment.create.mockImplementation(async ({ data }) => ({ id: 'a1', ...data }));
+  });
+
+  test('auto-pick chooses the preferred cleaner when they are available', async () => {
+    mockPrisma.customer.findUnique.mockResolvedValue({ preferredCleanerId: 'cleaner-fav' });
+    await dispatchService.createAssignment('biz1', 'bk1', null, 'user1');
+    expect(mockPrisma.bookingAssignment.create.mock.calls[0][0].data.cleanerId).toBe('cleaner-fav');
+  });
+
+  test('auto-pick falls back to the top candidate when the preferred cleaner is not available', async () => {
+    mockPrisma.customer.findUnique.mockResolvedValue({ preferredCleanerId: 'someone-busy' });
+    await dispatchService.createAssignment('biz1', 'bk1', null, 'user1');
+    expect(mockPrisma.bookingAssignment.create.mock.calls[0][0].data.cleanerId).toBe('cleaner-best');
+  });
+
+  test('a failure reading the preference never blocks dispatch', async () => {
+    mockPrisma.customer.findUnique.mockRejectedValue(new Error('db down'));
+    await dispatchService.createAssignment('biz1', 'bk1', null, 'user1');
+    expect(mockPrisma.bookingAssignment.create.mock.calls[0][0].data.cleanerId).toBe('cleaner-best');
   });
 });

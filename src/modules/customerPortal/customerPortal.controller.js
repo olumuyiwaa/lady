@@ -101,7 +101,38 @@ async function tipBooking(req, res, next) {
   }
 }
 
+const chat = require('../bookingChat/bookingChat.service');
+
+const handler = (fn, status = 200) => async (req, res, next) => {
+  try {
+    return success(res, status, await fn(req));
+  } catch (err) {
+    next(err);
+  }
+};
+
+const party = (req) => ({ type: 'CUSTOMER', customerId: req.portalCustomerId, userId: req.portalUserId });
+
+const getOverview = handler((req) => service.getOverview(req.businessId, req.portalCustomerId, req.portalUserId));
+const getReferral = handler((req) => service.getReferral(req.businessId, req.portalCustomerId));
+const listMyCleaners = handler((req) => service.listMyCleaners(req.businessId, req.portalCustomerId));
+const setPreferredCleaner = handler((req) =>
+  service.setPreferredCleaner(req.businessId, req.portalCustomerId, req.body.cleanerId || null)
+);
+const getTimeline = handler((req) => service.getMyTimeline(req.businessId, req.portalCustomerId, req.params.id));
+const listMessages = handler((req) =>
+  chat.listMessages(req.businessId, req.params.id, party(req), { after: req.query.after })
+);
+const postMessage = handler((req) => chat.postMessage(req.businessId, req.params.id, party(req), req.body), 201);
+
 module.exports = {
+  getOverview,
+  getReferral,
+  listMyCleaners,
+  setPreferredCleaner,
+  getTimeline,
+  listMessages,
+  postMessage,
   getInvoice,
   getInvoiceHtml,
   requestAccess,

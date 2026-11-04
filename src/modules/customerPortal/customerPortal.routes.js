@@ -29,7 +29,25 @@ function portalRoutesFor(resolveBusiness) {
   // Authenticated portal actions
   router.use(requireCustomerPortal);
 
+  router.get('/overview', controller.getOverview);
+  router.get('/referral', controller.getReferral);
+  router.get('/cleaners', controller.listMyCleaners);
+  router.put(
+    '/preferences/cleaner',
+    [body('cleanerId').optional({ nullable: true }).isString()],
+    validate,
+    controller.setPreferredCleaner
+  );
+
   router.get('/bookings', controller.listBookings);
+  router.get('/bookings/:id/timeline', controller.getTimeline);
+  router.get('/bookings/:id/messages', controller.listMessages);
+  router.post(
+    '/bookings/:id/messages',
+    [body('body').isString().trim().isLength({ min: 1, max: 1000 })],
+    validate,
+    controller.postMessage
+  );
   router.get('/bookings/:id', controller.getBooking);
   router.get('/bookings/:id/invoice', controller.getInvoice);
   router.get('/bookings/:id/invoice/html', controller.getInvoiceHtml);

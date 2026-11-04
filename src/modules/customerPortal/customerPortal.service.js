@@ -10,6 +10,8 @@ const notificationClient = require('../../lib/notificationClient');
 const logger = require('../../config/logger');
 const { createAncillaryCheckoutSession } = require('../../lib/stripeClient');
 const { findCustomerByPhone } = require('../../lib/phone');
+const { buildTimeline } = require('../../lib/bookingTimeline');
+const { REFERRAL_DISCOUNT_CENTS, REFERRAL_REWARD_CENTS } = require('../../lib/referral');
 
 const OTP_TTL_MS = 10 * 60 * 1000;
 const OTP_MAX_REQUESTS_PER_WINDOW = 3;
@@ -258,7 +260,41 @@ async function getMyBooking(businessId, customerId, bookingId) {
       }
     })
   );
-  return { ...b, photos };
+  const confirmedAt = await findConfirmedAt(businessId, bookingId);
+  return {
+    ...b,
+    photos,
+    timeline: buildTimeline(b, b.assignments, { confirmedAt }),
+  };
+}
+
+/** When staff confirmed the booking, from the audit log (null if never recorded). */
+async function findConfirmedAt(businessId, bookingId) {
+  try {
+    const row = await prisma.auditLog.findFirst({
+      where: { businessId, entityType: 'Booking', entityId: bookingId, action: 'BOOKING_CONFIRMED' },
+      orderBy: { createdAt: 'asc' },
+      select: { createdAt: true },
+    });
+    return row ? row.createdAt : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+/** Light-weight progress timeline, for live refresh while a visit is under way. */
+async function getMyTimeline(businessId, customerId, bookingId) {
+  const b = await prisma.booking.findFirst({
+    where: { id: bookingId, businessId, customerId },
+    include: { assignments: true },
+  });
+  if (!b) {
+    const err = new Error('Booking not found');
+    err.status = 404;
+    throw err;
+  }
+  const confirmedAt = await findConfirmedAt(businessId, bookingId);
+  return { status: b.status, ...buildTimeline(b, b.assignments, { confirmedAt }) };
 }
 
 /**
@@ -465,7 +501,145 @@ async function leaveReview(businessId, customerId, bookingId, { rating, comment 
   });
 }
 
+/**
+ * Referral programme view: the customer's code, how many friends used it and
+ * the reward coupons they have earned.
+ */
+async function getReferral(businessId, customerId) {
+  const customer = await prisma.customer.findFirst({
+    where: { id: customerId, businessId },
+    select: { referralCode: true },
+  });
+  if (!customer) {
+    const err = new Error('Customer not found');
+    err.status = 404;
+    throw err;
+  }
+  const code =
+    customer.referralCode || (await require('../customers/customers.service').ensureReferralCode(customerId));
+
+  const referred = await prisma.booking.findMany({
+    where: { businessId, referredByCustomerId: customerId },
+    select: { customerId: true, status: true },
+  });
+  const friendsBooked = new Set(referred.map((r) => r.customerId)).size;
+  const friendsCompleted = new Set(referred.filter((r) => r.status === 'COMPLETED').map((r) => r.customerId)).size;
+
+  const coupons = await prisma.coupon.findMany({
+    where: { businessId, ownerCustomerId: customerId },
+    orderBy: { createdAt: 'desc' },
+    take: 20,
+  });
+  const now = Date.now();
+  const rewards = coupons.map((c) => {
+    const used = c.maxRedemptions != null && (c.redeemedCount || 0) >= c.maxRedemptions;
+    const expired = !!c.expiresAt && new Date(c.expiresAt).getTime() < now;
+    return {
+      code: c.code,
+      valueCents: c.value,
+      expiresAt: c.expiresAt,
+      status: used ? 'USED' : expired || !c.isActive ? 'EXPIRED' : 'AVAILABLE',
+    };
+  });
+
+  return {
+    code,
+    giveCents: REFERRAL_DISCOUNT_CENTS,
+    getCents: REFERRAL_REWARD_CENTS,
+    friendsBooked,
+    friendsCompleted,
+    earnedCents: friendsBooked * REFERRAL_REWARD_CENTS,
+    rewards,
+  };
+}
+
+/** Cleaners who have completed a job for this customer (the ones they can pick as preferred). */
+async function listMyCleaners(businessId, customerId) {
+  const [customer, rows] = await Promise.all([
+    prisma.customer.findFirst({ where: { id: customerId, businessId }, select: { preferredCleanerId: true } }),
+    prisma.bookingAssignment.findMany({
+      where: { booking: { businessId, customerId, status: 'COMPLETED' } },
+      include: { cleaner: { include: { user: { select: { firstName: true, lastName: true } } } } },
+      orderBy: { assignedAt: 'desc' },
+      take: 200,
+    }),
+  ]);
+  const byId = new Map();
+  for (const a of rows) {
+    const c = a.cleaner;
+    if (!c || c.status !== 'ACTIVE') continue;
+    const entry = byId.get(c.id) || {
+      id: c.id,
+      name: `${c.user?.firstName || ''} ${c.user?.lastName || ''}`.trim(),
+      jobs: 0,
+    };
+    entry.jobs += 1;
+    byId.set(c.id, entry);
+  }
+  const cleaners = [...byId.values()].sort((a, b) => b.jobs - a.jobs);
+  const preferredCleanerId = customer?.preferredCleanerId || null;
+  return {
+    preferredCleanerId: cleaners.some((c) => c.id === preferredCleanerId) ? preferredCleanerId : null,
+    cleaners,
+  };
+}
+
+/** Sets (or clears, with null) the customer's preferred cleaner. */
+async function setPreferredCleaner(businessId, customerId, cleanerId) {
+  if (cleanerId) {
+    const { cleaners } = await listMyCleaners(businessId, customerId);
+    if (!cleaners.some((c) => c.id === cleanerId)) {
+      const err = new Error('You can only choose a cleaner who has cleaned for you before');
+      err.status = 422;
+      throw err;
+    }
+  }
+  await prisma.customer.update({ where: { id: customerId }, data: { preferredCleanerId: cleanerId || null } });
+  return listMyCleaners(businessId, customerId);
+}
+
+/** Everything the portal home screen needs in one call. */
+async function getOverview(businessId, customerId, portalUserId) {
+  const now = new Date();
+  const open = { notIn: ['CANCELLED', 'COMPLETED'] };
+  const [next, upcoming, completed, total, referral, mine, unreadMessages] = await Promise.all([
+    prisma.booking.findFirst({
+      where: { businessId, customerId, status: open, scheduledStart: { gte: now } },
+      orderBy: { scheduledStart: 'asc' },
+      include: {
+        service: { select: { id: true, name: true } },
+        assignments: { include: { cleaner: { include: { user: { select: { firstName: true, lastName: true } } } } } },
+      },
+    }),
+    prisma.booking.count({ where: { businessId, customerId, status: open, scheduledStart: { gte: now } } }),
+    prisma.booking.count({ where: { businessId, customerId, status: 'COMPLETED' } }),
+    prisma.booking.count({ where: { businessId, customerId } }),
+    getReferral(businessId, customerId),
+    listMyCleaners(businessId, customerId),
+    require('../bookingChat/bookingChat.service').unreadForCustomer(businessId, customerId, portalUserId),
+  ]);
+  const preferred = mine.cleaners.find((c) => c.id === mine.preferredCleanerId) || null;
+  return {
+    nextBooking: next,
+    counts: { upcoming, completed, total },
+    unreadMessages,
+    preferredCleaner: preferred,
+    referral: {
+      code: referral.code,
+      giveCents: referral.giveCents,
+      getCents: referral.getCents,
+      friendsBooked: referral.friendsBooked,
+      availableRewards: referral.rewards.filter((r) => r.status === 'AVAILABLE').length,
+    },
+  };
+}
+
 module.exports = {
+  getReferral,
+  listMyCleaners,
+  setPreferredCleaner,
+  getOverview,
+  getMyTimeline,
   requestAccess,
   verifyAccess,
   listMyBookings,

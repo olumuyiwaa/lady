@@ -372,11 +372,15 @@ model Coupon {
   maxRedemptions     Int?
   perCustomerLimit   Int?
   redeemedCount      Int?      @default(0)
+  // Set on referral reward coupons so the referrer can see them in the
+  // customer portal. Null for ordinary promotional coupons.
+  ownerCustomerId    String?
   bookings           Booking[]
   createdAt          DateTime  @default(now())
 
   @@unique([businessId, code])
   @@index([businessId])
+  @@index([ownerCustomerId])
 }
 
 // A stored-value gift card issued by a business, optionally purchased by
@@ -798,6 +802,10 @@ model Customer {
   // checklist item ids — existing customers created before this feature
   // just get one the first time they're read.
   referralCode String?  @unique
+  // Cleaner this customer would like for their visits (portal preference).
+  // Plain id, no relation: it is checked in code and never blocks deleting a
+  // cleaner. Dispatch suggestions rank this cleaner first when available.
+  preferredCleanerId String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 

@@ -68,7 +68,9 @@ async function createAssignment(businessId, bookingId, cleanerId, actorUserId, o
       err.status = 409;
       throw err;
     }
-    const top = candidates[0];
+    // A customer's preferred cleaner wins whenever they are available.
+    const preferredId = await preferredCleanerIdFor(booking.customerId);
+    const top = (preferredId && candidates.find((c) => c.cleaner && c.cleaner.id === preferredId)) || candidates[0];
     chosenCleaner = top.cleaner.id;
     pickReason = JSON.stringify({
       distanceMeters: top.distanceMeters,
@@ -240,6 +242,17 @@ async function getCleanerDayRoute(businessId, cleanerId, dateStr) {
   return { date: dateStr, stops, legs };
 }
 
+/** The customer's preferred cleaner id, or null (never throws: ranking must not fail over a preference). */
+async function preferredCleanerIdFor(customerId) {
+  if (!customerId) return null;
+  try {
+    const c = await prisma.customer.findUnique({ where: { id: customerId }, select: { preferredCleanerId: true } });
+    return (c && c.preferredCleanerId) || null;
+  } catch (e) {
+    return null;
+  }
+}
+
 async function suggestCleaners(businessId, bookingId, limit = 5) {
   const booking = await prisma.booking.findFirst({ where: { id: bookingId, businessId } });
   if (!booking) {
@@ -274,6 +287,11 @@ async function suggestCleaners(businessId, bookingId, limit = 5) {
   }));
 
   enriched.sort((a, b) => (a.etaMinutes != null && b.etaMinutes != null) ? a.etaMinutes - b.etaMinutes : (a.distanceMeters || 0) - (b.distanceMeters || 0));
-  return enriched.slice(0, limit);
+
+  // The customer's preferred cleaner (portal preference) goes first and is flagged.
+  const preferredId = await preferredCleanerIdFor(booking.customerId);
+  const flagged = enriched.map((c) => ({ ...c, preferredByCustomer: !!preferredId && c.id === preferredId }));
+  flagged.sort((a, b) => Number(b.preferredByCustomer) - Number(a.preferredByCustomer));
+  return flagged.slice(0, limit);
 }
 

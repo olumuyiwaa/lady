@@ -643,8 +643,8 @@ async function submitBooking(businessId, payload) {
   // discounts aren't designed to stack, to keep the pricing math and the
   // reward-issuing logic below from getting tangled with coupon redemption
   // limits).
-  const REFERRAL_DISCOUNT_CENTS = 2000; // new customer gets 20.00 off ("Give €20, Get €20")
-  const REFERRAL_REWARD_CENTS = 2000; // referrer gets a 20.00-off coupon for next time
+  // Amounts live in lib/referral.js ("Give €20, Get €20").
+  const { REFERRAL_DISCOUNT_CENTS, REFERRAL_REWARD_CENTS, REFERRAL_REWARD_VALID_DAYS } = require('../../lib/referral');
 
   const { booking, customer, referrer, referralDiscountCents } = await withBusinessLock(businessId, async (tx) => {
     await assertCapacity(businessId, start, end, q);
@@ -698,7 +698,9 @@ async function submitBooking(businessId, payload) {
           type: 'AMOUNT',
           value: REFERRAL_REWARD_CENTS,
           maxRedemptions: 1,
-          expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000),
+          // Lets the referrer see this reward in their customer portal.
+          ownerCustomerId: referrer.id,
+          expiresAt: new Date(Date.now() + REFERRAL_REWARD_VALID_DAYS * 24 * 60 * 60 * 1000),
         },
       });
       const notificationClient = require('../../lib/notificationClient');

@@ -51,7 +51,8 @@ function conversationBelongsToRequester(conv, requester) {
 async function listConversations(businessId, { page = 1, limit = 20 } = {}, requester = null) {
   const take = Math.min(Number(limit) || 20, 100);
   const skip = (Math.max(Number(page) || 1, 1) - 1) * take;
-  const scope = cleanerConversationFilter(requester);
+  // Per-booking customer<->cleaner chats are not part of the staff inbox.
+  const scope = { subjectType: { in: ['CLEANER', 'CUSTOMER'] }, ...cleanerConversationFilter(requester) };
 
   const [total, rows] = await Promise.all([
     prisma.conversation.count({ where: { businessId, ...scope } }),
