@@ -1,7 +1,7 @@
 /**
- * First-run setup for Lady Greener (a single cleaning business).
+ * First-run setup for Tod Cleaning Services (a single cleaning business).
  *
- *   OWNER_EMAIL=anna@ladygreener.nl OWNER_PASSWORD='...' npm run seed
+ *   OWNER_EMAIL=anna@todcleaning.nl OWNER_PASSWORD='...' npm run seed
  *
  * Idempotent: running it again leaves existing rows alone. It creates the one
  * Business, its opening hours, default pricing, the owner account, and a
@@ -20,13 +20,13 @@ async function main() {
   if (!email || !password) throw new Error('Set OWNER_EMAIL and OWNER_PASSWORD before seeding.');
   if (password.length < 12) throw new Error('OWNER_PASSWORD must be at least 12 characters.');
 
-  const subdomain = env('BUSINESS_SLUG', 'ladygreener');
+  const subdomain = env('BUSINESS_SLUG', 'todcleaning');
 
   let business = await prisma.business.findUnique({ where: { subdomain } });
   if (!business) {
     business = await prisma.business.create({
       data: {
-        name: env('BUSINESS_NAME', 'Lady Greener'),
+        name: env('BUSINESS_NAME', 'Tod Cleaning Services'),
         subdomain,
         timezone: 'Europe/Amsterdam',
         defaultLocale: 'nl',
@@ -67,7 +67,7 @@ async function main() {
         phone: env('OWNER_PHONE', null),
         passwordHash: await bcrypt.hash(password, 12),
         firstName: env('OWNER_FIRST_NAME', 'Owner'),
-        lastName: env('OWNER_LAST_NAME', 'Lady Greener'),
+        lastName: env('OWNER_LAST_NAME', 'Tod Cleaning Services'),
         globalRole: 'PLATFORM_USER',
         isEmailVerified: true,
       },

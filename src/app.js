@@ -28,9 +28,9 @@ const options = {
     definition: {
         openapi: '3.0.0',
         info: {
-            title: 'Lady Greener API',
+            title: 'Tod Cleaning Services API',
             version: '0.1.0',
-            description: 'Lady Greener operations backend',
+            description: 'Tod Cleaning Services operations backend',
         },
         servers: [
             { url: 'http://localhost:8000/api/v1', description: 'Local' },
@@ -61,7 +61,7 @@ const specs = swaggerJsdoc(options);
 if (process.env.NODE_ENV !== 'production' || process.env.ENABLE_API_DOCS === 'true') {
     app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs, {
         explorer: true,
-        customSiteTitle: 'Lady Greener API Docs',
+        customSiteTitle: 'Tod Cleaning Services API Docs',
     }));
 }
 
@@ -93,7 +93,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(apiLimiter);
 
 app.get('/health', (req, res) =>
-    res.json({ status: 'ok', service: 'ladygreener-api' })
+    res.json({ status: 'ok', service: 'todcleaning-api' })
 );
 
 app.use('/api/v1', routes);

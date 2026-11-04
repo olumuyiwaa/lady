@@ -1,7 +1,7 @@
 {
-  "name": "lady-greener-api",
+  "name": "tod-cleaning-api",
   "version": "0.1.0",
-  "description": "Lady Greener cleaning company backend (single business)",
+  "description": "Tod Cleaning Services cleaning company backend (single business)",
   "main": "src/server.js",
   "scripts": {
     "dev": "nodemon src/server.js",

@@ -3,7 +3,7 @@ const logger = require('../config/logger');
 /**
  * Cloudflare Turnstile verification for the public, unauthenticated write
  * endpoints. Without it anyone can script POST /widget/.../bookings and make
- * Lady Greener send SMS and email confirmations to arbitrary phone numbers and
+ * Tod Cleaning Services send SMS and email confirmations to arbitrary phone numbers and
  * addresses (SMS pumping / harassment) and fill a business's calendar.
  *
  * Set TURNSTILE_SECRET_KEY to enable. When unset the check is skipped (local

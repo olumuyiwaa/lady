@@ -8,7 +8,7 @@ const { revalidateStorefront } = require('../src/lib/storefrontRevalidate');
 const ENV = { ...process.env };
 beforeEach(() => {
   jest.clearAllMocks();
-  process.env = { ...ENV, REVALIDATE_SECRET: 's3cret', FRONTEND_URL: 'https://app.ladygreener.nl/' };
+  process.env = { ...ENV, REVALIDATE_SECRET: 's3cret', FRONTEND_URL: 'https://app.todcleaning.nl/' };
   global.fetch = jest.fn().mockResolvedValue({ ok: true, status: 200 });
   prisma.business.findUnique.mockResolvedValue({ subdomain: 'acme' });
 });
@@ -18,7 +18,7 @@ test('posts the business slug with the shared secret', async () => {
   await revalidateStorefront('biz1');
   expect(global.fetch).toHaveBeenCalledTimes(1);
   const [url, init] = global.fetch.mock.calls[0];
-  expect(url).toBe('https://app.ladygreener.nl/api/revalidate'); // trailing slash trimmed
+  expect(url).toBe('https://app.todcleaning.nl/api/revalidate'); // trailing slash trimmed
   expect(init.headers['x-revalidate-secret']).toBe('s3cret');
   expect(JSON.parse(init.body)).toEqual({ slugs: ['acme'] });
 });

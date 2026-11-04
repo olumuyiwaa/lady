@@ -64,7 +64,7 @@ try {
 }
 
 async function _sendEmailNow({ to, subject, text, html, from, replyTo }) {
-  from = from || process.env.EMAIL_FROM || 'no-reply@ladygreener.nl';
+  from = from || process.env.EMAIL_FROM || 'no-reply@todcleaning.nl';
   if (process.env.SENDGRID_API_KEY) {
     try {
       // await, so a SendGrid failure is caught here and falls through to SMTP

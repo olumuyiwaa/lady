@@ -417,7 +417,7 @@ async function brandingUploadUrl(businessId, { kind, filename, contentType }) {
 
 /**
  * Read-only: can this business take card payments, and what is its payment
- * preference. Lady Greener charges on its own Stripe account (see
+ * preference. Tod Cleaning Services charges on its own Stripe account (see
  * lib/stripeClient.js DIRECT_ACCOUNT), so there is nothing to connect.
  */
 async function getPaymentStatus(businessId) {

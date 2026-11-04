@@ -63,7 +63,7 @@ function renderFeed({ name, bookings, forCleaner = false, now = new Date() }) {
   const lines = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
-    'PRODID:-//Lady Greener//Calendar Feed//EN',
+    'PRODID:-//Tod Cleaning Services//Calendar Feed//EN',
     'CALSCALE:GREGORIAN',
     'METHOD:PUBLISH',
     `X-WR-CALNAME:${escapeText(name)}`,
@@ -88,7 +88,7 @@ function renderFeed({ name, bookings, forCleaner = false, now = new Date() }) {
       b.parkingInstructions && `Parking: ${b.parkingInstructions}`,
       b.petNotes && `Pets: ${b.petNotes}`,
       // Calendar apps sync to third-party servers, so a door code never goes in here.
-      b.accessCode && 'Access code: see the Lady Greener app',
+      b.accessCode && 'Access code: see the Tod Cleaning Services app',
     ]
       .filter(Boolean)
       .join('\n');
@@ -96,7 +96,7 @@ function renderFeed({ name, bookings, forCleaner = false, now = new Date() }) {
     const modified = b.updatedAt || b.createdAt || now;
     lines.push(
       'BEGIN:VEVENT',
-      `UID:booking-${b.id}@ladygreener`,
+      `UID:booking-${b.id}@todcleaning`,
       `DTSTAMP:${icsDate(now)}`,
       `LAST-MODIFIED:${icsDate(modified)}`,
       // Lets calendar apps recognise a changed event with the same UID as an update.

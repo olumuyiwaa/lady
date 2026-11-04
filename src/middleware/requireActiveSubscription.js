@@ -25,7 +25,7 @@ async function requireActiveSubscription(req, res, next) {
     return error(
       res,
       402,
-      'Your Lady Greener subscription is not active. Your data is read-only until you subscribe or update your payment method.',
+      'Your Tod Cleaning Services subscription is not active. Your data is read-only until you subscribe or update your payment method.',
       { code: 'SUBSCRIPTION_REQUIRED', state: access.state }
     );
   } catch (err) {

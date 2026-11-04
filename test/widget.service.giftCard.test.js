@@ -1,5 +1,5 @@
 /**
- * Covers the gift card gap: Lady Greener had no stored-value gift card at
+ * Covers the gift card gap: Tod Cleaning Services had no stored-value gift card at
  * all — only single-rule Coupon discounts, which can't express "$50 was
  * on this card, $20 was spent, $30 remains for next time". applyGiftCardToBooking
  * is the redemption half (checkGiftCardBalance is the read-only preview,

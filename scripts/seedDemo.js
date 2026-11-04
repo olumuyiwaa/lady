@@ -1,5 +1,5 @@
 /**
- * Demo seed for Lady Greener — fills every major dashboard page.
+ * Demo seed for Tod Cleaning Services — fills every major dashboard page.
  *
  * Prerequisites:
  *   1. Basic bootstrap already ran:
@@ -16,7 +16,7 @@ const bcrypt = require('bcryptjs');
 
 const prisma = new PrismaClient();
 
-const SLUG = process.env.BUSINESS_SLUG || 'ladygreener';
+const SLUG = process.env.BUSINESS_SLUG || 'todcleaning';
 const PASSWORD = process.env.DEMO_PASSWORD || 'DemoPass123!';
 
 function daysFromNow(n, hour = 10) {
@@ -147,7 +147,7 @@ async function main() {
     }
 
     const manager = await upsertUser({
-        email: 'manager@ladygreener.nl',
+        email: 'manager@todcleaning.nl',
         phone: '+31611110001',
         firstName: 'Marieke',
         lastName: 'de Vries',
@@ -165,9 +165,9 @@ async function main() {
     });
 
     const cleanerUsers = [
-        { email: 'sofia@ladygreener.nl', phone: '+31611110002', firstName: 'Sofia', lastName: 'Bakker' },
-        { email: 'jan@ladygreener.nl', phone: '+31611110003', firstName: 'Jan', lastName: 'Jansen' },
-        { email: 'amina@ladygreener.nl', phone: '+31611110004', firstName: 'Amina', lastName: 'Hassan' },
+        { email: 'sofia@todcleaning.nl', phone: '+31611110002', firstName: 'Sofia', lastName: 'Bakker' },
+        { email: 'jan@todcleaning.nl', phone: '+31611110003', firstName: 'Jan', lastName: 'Jansen' },
+        { email: 'amina@todcleaning.nl', phone: '+31611110004', firstName: 'Amina', lastName: 'Hassan' },
     ];
 
     const cleaners = [];
@@ -451,7 +451,7 @@ async function main() {
                 vatCents: 1215,
                 grossCents: 7000,
                 supplier: {
-                    name: 'Lady Greener',
+                    name: 'Tod Cleaning Services',
                     kvk: '12345678',
                     vat: 'NL123456789B01',
                     address: 'Prinsengracht 263, 1016 GV Amsterdam',
@@ -888,7 +888,7 @@ async function main() {
     console.log('Demo seed complete. Sign in and explore:');
     console.log('');
     console.log('  Owner (from bootstrap):  OWNER_EMAIL / OWNER_PASSWORD');
-    console.log('  Manager:                 manager@ladygreener.nl /', PASSWORD);
+    console.log('  Manager:                 manager@todcleaning.nl /', PASSWORD);
     console.log('  Cleaners:                sofia@… / jan@… / amina@… /', PASSWORD);
     console.log('');
     console.log('Pages to hit:');

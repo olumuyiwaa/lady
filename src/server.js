@@ -5,7 +5,7 @@ const { initSocket } = require('./config/socket');
 const logger = require('./config/logger');
 
 // The pricing page ("never a percentage of what your customers pay you")
-// and the Terms of Service ("Lady Greener does not charge a commission on
+// and the Terms of Service ("Tod Cleaning Services does not charge a commission on
 // jobs booked through a business's site") both promise this is 0. That
 // promise is only as good as this env var — nothing else in the code
 // re-checks it — so refuse to start rather than let a stray config change
@@ -62,7 +62,7 @@ const server = http.createServer(app);
 initSocket(server);
 
 server.listen(PORT, () => {
-  logger.info(`Lady Greener API listening on port ${PORT}`);
+  logger.info(`Tod Cleaning Services API listening on port ${PORT}`);
 });
 
 process.on('unhandledRejection', (err) => {

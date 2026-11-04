@@ -32,10 +32,10 @@ async function sendInvite(businessId, userId, { email, phone }) {
   const expiresAt = new Date(Date.now() + INVITE_TOKEN_TTL_MS);
   await prisma.passwordReset.create({ data: { userId, token: hashToken(token), expiresAt } });
 
-  const inviteUrl = `${process.env.APP_URL || 'https://app.ladygreener.nl'}/reset-password?token=${token}`;
+  const inviteUrl = `${process.env.APP_URL || 'https://app.todcleaning.nl'}/reset-password?token=${token}`;
 
-  const title = 'You were invited to join Lady Greener';
-  const body = `You've been invited to join a business on Lady Greener. Set your password to get started: ${inviteUrl}`;
+  const title = 'You were invited to join Tod Cleaning Services';
+  const body = `You've been invited to join a business on Tod Cleaning Services. Set your password to get started: ${inviteUrl}`;
 
   const recipients = userId ? [userId] : [];
 
@@ -219,7 +219,7 @@ async function notifyBookingRescheduled(businessId, booking) {
 /** Link into the customer portal of this business (where reviews, payment and invoices live). */
 async function portalUrl(businessId) {
   const biz = await prisma.business.findUnique({ where: { id: businessId }, select: { subdomain: true } });
-  const base = process.env.APP_URL || 'https://app.ladygreener.nl';
+  const base = process.env.APP_URL || 'https://app.todcleaning.nl';
   return biz && biz.subdomain ? `${base}/${biz.subdomain}/portal` : base;
 }
 

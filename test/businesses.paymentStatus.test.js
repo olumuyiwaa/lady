@@ -1,4 +1,4 @@
-// Lady Greener charges on its own Stripe account, so there is no Stripe Connect
+// Tod Cleaning Services charges on its own Stripe account, so there is no Stripe Connect
 // onboarding any more: the dashboard only needs to know whether card payments
 // are on (read-only) and the setup checklist no longer asks for Stripe.
 jest.mock('../src/config/database.js', () => ({

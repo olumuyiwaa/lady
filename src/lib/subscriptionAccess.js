@@ -1,7 +1,7 @@
 const prisma = require('../config/database');
 
 /**
- * Subscription access rules (Lady Greener -> business billing).
+ * Subscription access rules (Tod Cleaning Services -> business billing).
  *
  * Until now nothing in the API looked at BusinessSubscription.status or
  * trialEndsAt, and a freshly registered business has no subscription row at
@@ -27,7 +27,7 @@ const prisma = require('../config/database');
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function enforcementEnabled() {
-  // Lady Greener is a single business, not a SaaS: there is no plan to enforce.
+  // Tod Cleaning Services is a single business, not a SaaS: there is no plan to enforce.
   return false;
 }
 

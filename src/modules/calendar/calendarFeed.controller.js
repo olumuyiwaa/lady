@@ -44,7 +44,7 @@ async function serve(req, res, next) {
     const body = await service.renderForToken(token);
     res.set({
       'Content-Type': 'text/calendar; charset=utf-8',
-      'Content-Disposition': 'inline; filename="ladygreener.ics"',
+      'Content-Disposition': 'inline; filename="todcleaning.ics"',
       // The URL is a secret: keep it out of shared caches and referrers.
       'Cache-Control': 'private, max-age=300',
       'Referrer-Policy': 'no-referrer',

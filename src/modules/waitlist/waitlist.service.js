@@ -129,7 +129,7 @@ async function notifyWaitlistForFreedSlot(businessId, { serviceId, scheduledStar
       if (entry.contactEmail) {
         await notificationClient.sendEmail({
           to: entry.contactEmail,
-          subject: `${business?.name || 'Lady Greener'}: a slot opened up`,
+          subject: `${business?.name || 'Tod Cleaning Services'}: a slot opened up`,
           text: msg,
           html: `<p>${msg}</p>`,
         });

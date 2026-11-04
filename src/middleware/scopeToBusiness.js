@@ -1,7 +1,7 @@
 const { error } = require('../utils/response');
 
 /**
- * Attaches req.businessId for every staff/dashboard route. Lady Greener has a
+ * Attaches req.businessId for every staff/dashboard route. Tod Cleaning Services has a
  * single business, so this is the authenticated user's own business and no
  * client-supplied businessId is ever honoured (no super admin, no franchise
  * switching).

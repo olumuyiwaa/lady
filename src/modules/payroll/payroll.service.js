@@ -249,7 +249,7 @@ async function getMyEarningsSummary(businessId, cleanerUserId, cleanerProfileId)
 
 /**
  * Batches a cleaner's currently-PENDING earnings into a Payout the business
- * marks as paid once the money has actually moved outside Lady Greener (bank
+ * marks as paid once the money has actually moved outside Tod Cleaning Services (bank
  * transfer, cash, their own payroll run).
  */
 async function createPayout(businessId, actorUserId, cleanerId, { method, reference } = {}) {
@@ -402,7 +402,7 @@ async function payViaStripe(businessId, actorUserId, payoutId) {
     amountCents: payout.totalCents,
     currency: payout.business.currency,
     payoutId: payout.id,
-    description: `Lady Greener payout ${payout.id} (${payout.cleaner.user.firstName} ${payout.cleaner.user.lastName})`,
+    description: `Tod Cleaning Services payout ${payout.id} (${payout.cleaner.user.firstName} ${payout.cleaner.user.lastName})`,
   });
 
   const updated = await prisma.$transaction(async (tx) => {

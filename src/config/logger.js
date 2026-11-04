@@ -13,7 +13,7 @@ const logger = winston.createLogger({
       format: winston.format.combine(winston.format.colorize(), winston.format.simple()),
     }),
     new winston.transports.DailyRotateFile({
-      filename: 'logs/ladygreener-%DATE%.log',
+      filename: 'logs/todcleaning-%DATE%.log',
       datePattern: 'YYYY-MM-DD',
       maxFiles: '14d',
     }),

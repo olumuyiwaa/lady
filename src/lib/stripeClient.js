@@ -3,7 +3,7 @@ const prisma = require('../config/database');
 const logger = require('../config/logger');
 
 /**
- * Lady Greener takes payments on its own Stripe account (no Stripe Connect).
+ * Tod Cleaning Services takes payments on its own Stripe account (no Stripe Connect).
  * The business row stores DIRECT_ACCOUNT in stripeConnectedAccountId so every
  * existing "is Stripe set up?" check keeps working, and this helper turns that
  * marker into "no stripeAccount header" so Stripe uses our own account.
@@ -70,7 +70,7 @@ function appUrl() {
 }
 
 /**
- * Hosted Checkout for the platform's own subscription billing (Lady Greener ->
+ * Hosted Checkout for the platform's own subscription billing (Tod Cleaning Services ->
  * business). This is how a payment method gets attached: creating a Stripe
  * subscription server-side for a customer with no payment method leaves it
  * `incomplete` forever, so the subscription must be started through Checkout.
@@ -185,7 +185,7 @@ async function retrieveEvent(rawBody, sig) {
 
 /**
  * Platform fee on each job-level payment, in basis points (150 = 1.5%).
- * Lady Greener keeps the full payment, so this must stay 0: server.js refuses
+ * Tod Cleaning Services keeps the full payment, so this must stay 0: server.js refuses
  * to start when PLATFORM_APPLICATION_FEE_BPS is non-zero. Kept (rather than
  * removed) so the checkout/refund code paths that read it need no change.
  */
@@ -293,7 +293,7 @@ async function createCleanerConnectAccountAndLink(user, { refreshUrl, returnUrl 
  *
  * This is deliberately not a transfer from the platform's own balance.
  * Job payments are direct charges on the business's connected account
- * (see createDirectCheckoutSession) — Lady Greener's
+ * (see createDirectCheckoutSession) — Tod Cleaning Services'
  * platform account only ever holds the optional application fee, so it has
  * no cleaner-payroll funds to move. Passing { stripeAccount:
  * businessConnectedAccountId } makes Stripe create the Transfer as that
@@ -368,13 +368,13 @@ async function payCleanerTransfer({
  * Creates a one-time Checkout Session as a DIRECT charge on the business's own
  * connected account: the business is the merchant of record, the payment (and
  * any dispute or refund) lives on its account, it pays Stripe's fees, and the
- * money never sits in Lady Greener's balance. Lady Greener only ever collects
+ * money never sits in Tod Cleaning Services' balance. Tod Cleaning Services only ever collects
  * application_fee_amount, which is 0 by default (see PLATFORM_APPLICATION_FEE_BPS).
  *
  * This replaces destination charges (transfer_data.destination), under which the
  * platform was the merchant of record, carried disputes and paid the processing
  * fees - while the pricing page promises a 0% fee and that money never routes
- * through Lady Greener.
+ * through Tod Cleaning Services.
  *
  * metadata.bookingId / purpose are read back by the webhook to mark the booking
  * paid; events for these sessions arrive with event.account set.

@@ -8,7 +8,7 @@ const notifications = require('../notifications/notifications.service');
  * Invites a teammate (BUSINESS_MANAGER, or ORG_ADMIN on a parent/franchise
  * business) into a business. Mirrors cleaners.service.onboardCleaner's
  * find-or-create-user + invite-link pattern, since this is the same shape
- * of problem: a person may or may not already have a Lady Greener account.
+ * of problem: a person may or may not already have a Tod Cleaning Services account.
  *
  * Until this existed, the only BusinessMember ever created was the owner
  * row registerBusiness makes at signup — there was no way for an owner to

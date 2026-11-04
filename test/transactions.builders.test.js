@@ -81,7 +81,7 @@ describe('event builders', () => {
   test('a subscription invoice is OUT for the business, FAILED unless paid', () => {
     const ok = b.subscriptionInvoice({ businessId: 'biz1', invoiceId: 'in_1', amountCents: 2900, currency: 'eur', paid: true });
     const bad = b.subscriptionInvoice({ businessId: 'biz1', invoiceId: 'in_1', amountCents: 2900, currency: 'eur', paid: false });
-    expect(ok).toMatchObject({ type: 'SUBSCRIPTION', direction: 'OUT', status: 'SUCCEEDED', counterpartyName: 'Lady Greener' });
+    expect(ok).toMatchObject({ type: 'SUBSCRIPTION', direction: 'OUT', status: 'SUCCEEDED', counterpartyName: 'Tod Cleaning Services' });
     expect(bad.status).toBe('FAILED');
     expect(ok.dedupeKey).toBe(bad.dedupeKey); // same invoice, one row
   });

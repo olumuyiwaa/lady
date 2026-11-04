@@ -2,7 +2,7 @@ const prisma = require('../config/database');
 const { error } = require('../utils/response');
 
 /**
- * Lady Greener is one business. Public widget/portal routes always resolve to
+ * Tod Cleaning Services is one business. Public widget/portal routes always resolve to
  * that business, whatever Host header or :subdomain the request carries, so
  * existing storefront URLs keep working without any DNS or slug setup.
  */

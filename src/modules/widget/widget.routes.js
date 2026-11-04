@@ -86,7 +86,7 @@ function widgetRoutesFor(resolveBusiness) {
 const hostRouter = widgetRoutesFor(resolveBusinessFromHost);
 
 // Slug-based: works immediately with zero DNS/proxy setup, served from a
-// single shared widget domain (e.g. widget.ladygreener.nl/w/:subdomain/...).
+// single shared widget domain (e.g. widget.todcleaning.nl/w/:subdomain/...).
 // Mounted at /widget-embed/:subdomain in app.js.
 const slugRouter = express.Router({ mergeParams: true });
 slugRouter.use('/', widgetRoutesFor(resolveBusinessFromSlug));

@@ -1,6 +1,6 @@
-# Lady Greener API
+# Tod Cleaning Services API
 
-Backend for **Lady Greener**, a cleaning company in the Netherlands: online
+Backend for **Tod Cleaning Services**, a cleaning company in the Netherlands: online
 booking, scheduling and dispatch, cleaners and their documents, payroll,
 invoicing with Dutch BTW, customer portal, reviews, waitlist, inventory,
 compliance and a transaction log.
@@ -26,7 +26,7 @@ Frontend: [lady_frontend](https://github.com/olumuyiwaa/lady_frontend)
 
 ## Payments
 
-Customers pay Lady Greener's **own Stripe account** (`STRIPE_SECRET_KEY`).
+Customers pay Tod Cleaning Services' **own Stripe account** (`STRIPE_SECRET_KEY`).
 The business row stores `stripeConnectedAccountId = 'direct'`, which makes
 `lib/stripeClient.js` send no `stripeAccount` header, so existing "is Stripe
 set up?" checks keep working. Prices are VAT-inclusive; see `src/lib/vat.js`.
@@ -40,7 +40,7 @@ cp .env.example .env        # fill DATABASE_URL, JWT secrets, STRIPE_*, OWNER_*
 npm ci
 npx prisma generate
 npm run migrate
-OWNER_EMAIL=owner@ladygreener.nl OWNER_PASSWORD='a-long-password' npm run seed
+OWNER_EMAIL=owner@todcleaning.nl OWNER_PASSWORD='a-long-password' npm run seed
 npm run dev
 ```
 

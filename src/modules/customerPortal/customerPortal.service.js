@@ -121,7 +121,7 @@ async function requestAccess(businessId, { phone, email } = {}) {
     },
   });
 
-  const text = `Your Lady Greener access code is ${code}. It expires in 10 minutes.`;
+  const text = `Your Tod Cleaning Services access code is ${code}. It expires in 10 minutes.`;
   try {
     // An email login never triggers an SMS: the customer chose email, and SMS costs money.
     if (!viaEmail && customer.phone) await notificationClient.sendSms({ to: customer.phone, body: text });

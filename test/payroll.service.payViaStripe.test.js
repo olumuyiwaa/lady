@@ -1,6 +1,6 @@
 /**
  * Covers the gap fixed here: Payout used to only ever be settled manually
- * (business ticks "mark as paid" once money moved outside Lady Greener).
+ * (business ticks "mark as paid" once money moved outside Tod Cleaning Services).
  * payViaStripe adds a real disbursement path: a Stripe transfer from the
  * business's own Connect balance to the cleaner's connected account.
  */

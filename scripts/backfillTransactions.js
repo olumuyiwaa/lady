@@ -96,7 +96,7 @@ async function backfill({ prisma, dryRun = false, log = console.log }) {
     await insert(prisma, rows, dryRun, tally, 'payouts');
   }
 
-  // What businesses paid Lady Greener. Only invoices that were paid, or that failed and are still open.
+  // What businesses paid Tod Cleaning Services. Only invoices that were paid, or that failed and are still open.
   for await (const invoices of batches(prisma, 'platformInvoice', {
     include: { subscription: { select: { businessId: true, business: { select: { currency: true } } } } },
   })) {

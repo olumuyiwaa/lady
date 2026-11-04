@@ -250,7 +250,7 @@ async function handle(req, res) {
       }
     } else if (type === 'charge.dispute.created' || type === 'charge.dispute.closed') {
       // With direct charges the dispute belongs to the business's Stripe
-      // account; Lady Greener's job is to make sure the business notices and that
+      // account; Tod Cleaning Services' job is to make sure the business notices and that
       // the cleaner's not-yet-paid earning for the job is put on hold.
       const pi = paymentIntentIdOf(obj.payment_intent);
       const booking = pi
@@ -323,7 +323,7 @@ async function handle(req, res) {
         }), { updateOnConflict: true });
       }
     } else if (type === 'account.application.deauthorized') {
-      // The business disconnected Lady Greener from its Stripe account.
+      // The business disconnected Tod Cleaning Services from its Stripe account.
       if (event.account) {
         await prisma.business.updateMany({
           where: { stripeConnectedAccountId: event.account },

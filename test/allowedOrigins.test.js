@@ -3,14 +3,14 @@ const cors = require('cors');
 const request = require('supertest');
 const { isOriginAllowed, corsOptions } = require('../src/lib/allowedOrigins');
 
-const prod = (over = {}) => ({ NODE_ENV: 'production', FRONTEND_URL: 'https://app.ladygreener.nl', ...over });
+const prod = (over = {}) => ({ NODE_ENV: 'production', FRONTEND_URL: 'https://app.todcleaning.nl', ...over });
 
 describe('isOriginAllowed', () => {
   test('allows the configured frontend and rejects other origins', () => {
     const env = prod();
-    expect(isOriginAllowed('https://app.ladygreener.nl', { env })).toBe(true);
+    expect(isOriginAllowed('https://app.todcleaning.nl', { env })).toBe(true);
     expect(isOriginAllowed('https://evil.example', { env })).toBe(false);
-    expect(isOriginAllowed('https://app.ladygreener.nl.evil.example', { env })).toBe(false);
+    expect(isOriginAllowed('https://app.todcleaning.nl.evil.example', { env })).toBe(false);
   });
 
   test('requests without an Origin header are not subject to CORS', () => {
@@ -18,29 +18,29 @@ describe('isOriginAllowed', () => {
   });
 
   test('a trailing slash, path or different case in FRONTEND_URL still matches', () => {
-    expect(isOriginAllowed('https://app.ladygreener.nl', { env: prod({ FRONTEND_URL: 'https://app.ladygreener.nl/' }) })).toBe(true);
-    expect(isOriginAllowed('https://app.ladygreener.nl', { env: prod({ FRONTEND_URL: 'https://App.LadyGreener.nl/dashboard' }) })).toBe(true);
+    expect(isOriginAllowed('https://app.todcleaning.nl', { env: prod({ FRONTEND_URL: 'https://app.todcleaning.nl/' }) })).toBe(true);
+    expect(isOriginAllowed('https://app.todcleaning.nl', { env: prod({ FRONTEND_URL: 'https://App.TodCleaning.nl/dashboard' }) })).toBe(true);
   });
 
   test('FRONTEND_URL may be a comma-separated list', () => {
-    const env = prod({ FRONTEND_URL: 'https://app.ladygreener.nl, https://staging.ladygreener.nl/' });
-    expect(isOriginAllowed('https://staging.ladygreener.nl', { env })).toBe(true);
-    expect(isOriginAllowed('https://other.ladygreener.nl', { env })).toBe(false);
+    const env = prod({ FRONTEND_URL: 'https://app.todcleaning.nl, https://staging.todcleaning.nl/' });
+    expect(isOriginAllowed('https://staging.todcleaning.nl', { env })).toBe(true);
+    expect(isOriginAllowed('https://other.todcleaning.nl', { env })).toBe(false);
   });
 
   test('WIDGET_BASE_DOMAIN allows its https subdomains, not look-alikes or plain http in production', () => {
-    const env = prod({ WIDGET_BASE_DOMAIN: 'widget.ladygreener.nl' });
-    expect(isOriginAllowed('https://widget.ladygreener.nl', { env })).toBe(true);
-    expect(isOriginAllowed('https://a.widget.ladygreener.nl', { env })).toBe(true);
-    expect(isOriginAllowed('http://a.widget.ladygreener.nl', { env })).toBe(false);
-    expect(isOriginAllowed('https://evilwidget.ladygreener.nl', { env })).toBe(false);
-    expect(isOriginAllowed('https://widget.ladygreener.nl.evil.example', { env })).toBe(false);
+    const env = prod({ WIDGET_BASE_DOMAIN: 'widget.todcleaning.nl' });
+    expect(isOriginAllowed('https://widget.todcleaning.nl', { env })).toBe(true);
+    expect(isOriginAllowed('https://a.widget.todcleaning.nl', { env })).toBe(true);
+    expect(isOriginAllowed('http://a.widget.todcleaning.nl', { env })).toBe(false);
+    expect(isOriginAllowed('https://evilwidget.todcleaning.nl', { env })).toBe(false);
+    expect(isOriginAllowed('https://widget.todcleaning.nl.evil.example', { env })).toBe(false);
   });
 
   test('widget: false (sockets) ignores WIDGET_BASE_DOMAIN', () => {
-    const env = prod({ WIDGET_BASE_DOMAIN: 'widget.ladygreener.nl' });
-    expect(isOriginAllowed('https://a.widget.ladygreener.nl', { env, widget: false })).toBe(false);
-    expect(isOriginAllowed('https://app.ladygreener.nl', { env, widget: false })).toBe(true);
+    const env = prod({ WIDGET_BASE_DOMAIN: 'widget.todcleaning.nl' });
+    expect(isOriginAllowed('https://a.widget.todcleaning.nl', { env, widget: false })).toBe(false);
+    expect(isOriginAllowed('https://app.todcleaning.nl', { env, widget: false })).toBe(true);
   });
 
   test('localhost dev origins are allowed outside production only', () => {
@@ -62,9 +62,9 @@ describe('corsOptions on a real Express app', () => {
 
   test('an allowed origin gets the CORS header', async () => {
     Object.assign(process.env, prod());
-    const res = await request(app()).get('/x').set('Origin', 'https://app.ladygreener.nl');
+    const res = await request(app()).get('/x').set('Origin', 'https://app.todcleaning.nl');
     expect(res.status).toBe(200);
-    expect(res.headers['access-control-allow-origin']).toBe('https://app.ladygreener.nl');
+    expect(res.headers['access-control-allow-origin']).toBe('https://app.todcleaning.nl');
   });
 
   test('a blocked origin is answered normally, without CORS headers (no 500)', async () => {

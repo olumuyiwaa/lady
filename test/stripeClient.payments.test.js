@@ -31,7 +31,7 @@ describe('stripeClient payments', () => {
     expect(opts).toEqual({ stripeAccount: 'acct_biz', idempotencyKey: 'k1' });
   });
 
-  test("Lady Greener's own-account marker sends no stripeAccount header and never reverses a transfer", async () => {
+  test("Tod Cleaning Services' own-account marker sends no stripeAccount header and never reverses a transfer", async () => {
     await client.createRefund({ paymentIntentId: 'pi_1', amountCents: 500, connectedAccountId: client.DIRECT_ACCOUNT, idempotencyKey: 'k2' });
     const [params, opts] = mockStripe.refunds.create.mock.calls[0];
     expect(params.reverse_transfer).toBeUndefined();

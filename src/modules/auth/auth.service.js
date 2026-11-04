@@ -14,7 +14,7 @@ const otp = require('../../lib/otp');
 const BCRYPT_ROUNDS = 12;
 // Compared against when the email is unknown so a missing account costs the
 // same time as a wrong password and login cannot be used to enumerate users.
-const DUMMY_HASH = bcrypt.hashSync('ladygreener-timing-equaliser', BCRYPT_ROUNDS);
+const DUMMY_HASH = bcrypt.hashSync('todcleaning-timing-equaliser', BCRYPT_ROUNDS);
 
 const OTP_WINDOW_MS = 15 * 60 * 1000;
 const OTP_MAX_FAILURES = 5;
@@ -311,7 +311,7 @@ async function requestPasswordReset(email) {
   // /reset-password (not /auth/password-reset/confirm — there is no such
   // route in the Next.js app; see lady_frontend's
   // (full-width-pages)/(auth)/reset-password/page.tsx).
-  const resetUrl = `${process.env.APP_URL || 'https://app.ladygreener.nl'}/reset-password?token=${token}`;
+  const resetUrl = `${process.env.APP_URL || 'https://app.todcleaning.nl'}/reset-password?token=${token}`;
   await notificationClient.sendEmail({
     to: user.email,
     subject: 'Reset your password',

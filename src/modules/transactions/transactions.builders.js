@@ -203,12 +203,12 @@ function cleanerPayout({ payout, cleanerName, currency }) {
   };
 }
 
-/** The business paying Lady Greener. FAILED rows become SUCCEEDED when a retry works. */
+/** The business paying Tod Cleaning Services. FAILED rows become SUCCEEDED when a retry works. */
 function subscriptionInvoice({ businessId, platformInvoiceId, invoiceId, amountCents, currency, paid, occurredAt }) {
   return {
     businessId,
     platformInvoiceId: platformInvoiceId || null,
-    counterpartyName: 'Lady Greener',
+    counterpartyName: 'Tod Cleaning Services',
     currency: upper(currency),
     type: 'SUBSCRIPTION',
     direction: 'OUT',
@@ -216,7 +216,7 @@ function subscriptionInvoice({ businessId, platformInvoiceId, invoiceId, amountC
     status: paid ? 'SUCCEEDED' : 'FAILED',
     amountCents,
     occurredAt: occurredAt || new Date(),
-    description: paid ? 'Lady Greener subscription' : 'Lady Greener subscription payment failed',
+    description: paid ? 'Tod Cleaning Services subscription' : 'Tod Cleaning Services subscription payment failed',
     stripeInvoiceId: invoiceId,
     dedupeKey: `subinv:${invoiceId}`,
   };

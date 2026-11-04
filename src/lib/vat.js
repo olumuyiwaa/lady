@@ -1,5 +1,5 @@
 /**
- * BTW / VAT helpers. Every price in Lady Greener is VAT-INCLUSIVE (gross): that is
+ * BTW / VAT helpers. Every price in Tod Cleaning Services is VAT-INCLUSIVE (gross): that is
  * how consumer prices must be displayed in the Netherlands. VAT is therefore
  * extracted from the gross amount, never added on top, so what the customer
  * was quoted is exactly what they are charged and invoiced.

@@ -20,7 +20,7 @@ describe('renderFeed', () => {
     expect(out.endsWith('END:VCALENDAR\r\n')).toBe(true);
     expect(/[^\r]\n/.test(out)).toBe(false);
     const l = lines(out);
-    expect(l).toContain('UID:booking-bk1@ladygreener');
+    expect(l).toContain('UID:booking-bk1@todcleaning');
     expect(l).toContain('DTSTART:20261010T080000Z');
     expect(l).toContain('DTEND:20261010T103000Z');
     expect(l).toContain('STATUS:CONFIRMED');
@@ -29,7 +29,7 @@ describe('renderFeed', () => {
   test('a door code is never written into the feed', () => {
     const out = renderFeed({ name: 'x', bookings: [booking()], now: NOW });
     expect(out).not.toContain('4821');
-    expect(lines(out).join('\n')).toContain('Access code: see the Lady Greener app');
+    expect(lines(out).join('\n')).toContain('Access code: see the Tod Cleaning Services app');
   });
 
   test('cleaner feeds show first name only and no phone number', () => {
