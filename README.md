@@ -39,13 +39,21 @@ secret in `STRIPE_WEBHOOK_SECRETS`.
 cp .env.example .env        # fill DATABASE_URL, JWT secrets, STRIPE_*, OWNER_*
 npm ci
 npx prisma generate
-npm run migrate
+npm run migrate             # deploy existing migrations (production / CI)
+# npm run migrate:dev       # create a new migration (local dev schema changes)
 OWNER_EMAIL=owner@todcleaning.nl OWNER_PASSWORD='a-long-password' npm run seed
 npm run dev
 ```
 
-Workers (run alongside the API in production): `notification-worker`,
-`recurring-daemon`, `reminder-daemon`, `sweep-deposits`, `precompute-slots`.
+Workers (run alongside the API in production):
+
+| Script | Command | What it does |
+|--------|---------|--------------|
+| `notification-worker` | `npm run notification-worker` | Drains the Bull queue — sends email & SMS jobs |
+| `recurring-daemon` | `npm run recurring-daemon` | Cron (default every 5 min) — generates upcoming recurring visits and sweeps unpaid deposits |
+| `reminder-daemon` | `npm run reminder-daemon` | Cron (default hourly) — sends booking reminder messages |
+| `sweep-deposits` | `npm run sweep-deposits` | One-shot deposit sweeper (also run inside the recurring daemon) |
+| `precompute-slots` | `npm run precompute-slots` | Warms the Redis slot cache for the booking widget; run once daily |
 
 ## Tests
 
