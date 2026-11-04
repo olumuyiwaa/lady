@@ -78,17 +78,6 @@ describe('dispatch.service.createAssignment', () => {
     expect(mockPrisma.bookingAssignment.create).not.toHaveBeenCalled();
   });
 
-  test('auto-pick is blocked with a 402 when the business plan has autoDispatch disabled', async () => {
-    mockPrisma.booking.findFirst.mockResolvedValue(booking);
-    mockPrisma.businessSubscription.findUnique.mockResolvedValue({
-      plan: { features: { autoDispatch: false } },
-    });
-    await expect(dispatchService.createAssignment('biz1', 'bk1', null, 'user1')).rejects.toMatchObject({
-      status: 402,
-    });
-    expect(scheduler.findAvailableCleaners).not.toHaveBeenCalled();
-  });
-
   test('manual assignment (explicit cleanerId) is unaffected by the autoDispatch plan gate', async () => {
     mockPrisma.booking.findFirst.mockResolvedValue(booking);
     mockPrisma.cleanerProfile.findFirst.mockResolvedValue({ id: 'cleaner-x', businessId: 'biz1', status: 'ACTIVE' });

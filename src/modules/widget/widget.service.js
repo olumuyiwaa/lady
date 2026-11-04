@@ -643,8 +643,8 @@ async function submitBooking(businessId, payload) {
   // discounts aren't designed to stack, to keep the pricing math and the
   // reward-issuing logic below from getting tangled with coupon redemption
   // limits).
-  const REFERRAL_DISCOUNT_CENTS = 1000; // new customer gets 10.00 off
-  const REFERRAL_REWARD_CENTS = 1000; // referrer gets a 10.00-off coupon for next time
+  const REFERRAL_DISCOUNT_CENTS = 2000; // new customer gets 20.00 off ("Give €20, Get €20")
+  const REFERRAL_REWARD_CENTS = 2000; // referrer gets a 20.00-off coupon for next time
 
   const { booking, customer, referrer, referralDiscountCents } = await withBusinessLock(businessId, async (tx) => {
     await assertCapacity(businessId, start, end, q);

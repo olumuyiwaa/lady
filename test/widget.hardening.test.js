@@ -189,8 +189,8 @@ describe('abuse controls', () => {
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({ id: 'ref', phone: '+31600000000', email: 'friend@x.nl' });
     const r = await widget.submitBooking('biz', payload({ referralCode: 'abc123' }));
-    expect(r.referralDiscountCents).toBe(1000);
-    expect(prisma.booking.create.mock.calls[0][0].data.quotedPriceCents).toBe(7000);
+    expect(r.referralDiscountCents).toBe(2000);
+    expect(prisma.booking.create.mock.calls[0][0].data.quotedPriceCents).toBe(6000);
   });
 });
 

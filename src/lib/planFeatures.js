@@ -12,6 +12,12 @@ const { error } = require('../utils/response');
  * differences, not to lock everything down by default.
  */
 async function hasPlanFeature(businessId, featureKey) {
+  // Single-business deployment: there are no plan tiers, so every feature is
+  // available. (Kept as a function so existing route gates keep working.)
+  return true;
+}
+
+async function _legacyHasPlanFeature(businessId, featureKey) {
   // Own plan, or - for a business still in its no-card platform trial - the
   // cheapest plan. null only when subscription enforcement is off.
   const plan = await getEffectivePlan(businessId);
@@ -37,4 +43,4 @@ function requirePlanFeature(featureKey, label) {
   };
 }
 
-module.exports = { hasPlanFeature, requirePlanFeature };
+module.exports = { hasPlanFeature, requirePlanFeature, _legacyHasPlanFeature };
