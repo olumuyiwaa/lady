@@ -17,6 +17,7 @@
     "migrate:dev": "prisma migrate dev",
     "migrate": "prisma migrate deploy",
     "seed": "node prisma/bootstrap.js",
+    "reset-password": "node scripts/resetPassword.js",
     "studio": "prisma studio",
     "send-reminders": "node src/workers/sendReminders.js",
     "reminder-daemon": "node src/workers/reminderDaemon.js",
