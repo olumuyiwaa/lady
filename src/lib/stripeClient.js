@@ -184,10 +184,10 @@ async function retrieveEvent(rawBody, sig) {
 }
 
 /**
- * Platform fee taken on each job-level payment, in basis points (1/100 of a
- * percent). 150 = 1.5%. Configurable per deployment; falls back to 0 (pure
- * pass-through) if unset, which is a valid choice if the fee is instead
- * folded into the subscription plan price.
+ * Platform fee on each job-level payment, in basis points (150 = 1.5%).
+ * Lady Greener keeps the full payment, so this must stay 0: server.js refuses
+ * to start when PLATFORM_APPLICATION_FEE_BPS is non-zero. Kept (rather than
+ * removed) so the checkout/refund code paths that read it need no change.
  */
 function getApplicationFeeBps() {
   const raw = process.env.PLATFORM_APPLICATION_FEE_BPS;

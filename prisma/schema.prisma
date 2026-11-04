@@ -139,11 +139,13 @@ model Business {
   parentBusiness   Business?  @relation("BusinessLocations", fields: [parentBusinessId], references: [id], onDelete: SetNull)
   locations        Business[] @relation("BusinessLocations")
 
-  // Stripe Connect — required before this business can accept job-level
-  // customer payments through Lady Greener. Money for a paid booking is
-  // transferred to this connected account (minus the platform fee), never
-  // held in Lady Greener's own Stripe balance. Subscription billing
-  // (BusinessSubscription below) is unrelated and unaffected by this.
+  // Stripe account for job-level customer payments. Lady Greener is a single
+  // business that charges on its OWN Stripe account: stripeConnectedAccountId
+  // holds the sentinel 'direct' (lib/stripeClient.js DIRECT_ACCOUNT), which
+  // makes the client send no `stripeAccount` header, and the seed marks the
+  // account charges-enabled. There is no platform fee. The column names date
+  // from the multi-tenant platform this was forked from.
+  // (BusinessSubscription below is unused here: nothing enforces a plan.)
   stripeConnectedAccountId   String?                    @unique
   stripeConnectOnboarded     Boolean                    @default(false)
   stripeChargesEnabled       Boolean                    @default(false)
@@ -244,8 +246,7 @@ model BusinessBranding {
   // single whole-list save from the settings UI.
   testimonials     Json?
   // Each: { question, answer } — reused as-is as FAQPage structured data
-  // on the public site, the same pattern the marketing site's own
-  // /pricing FAQ uses.
+  // on the public site.
   faqItems         Json?
   galleryImageKeys String[] @default([])
   // { facebook?, instagram?, tiktok?, linkedin?, twitter? } — all optional,
@@ -1353,9 +1354,8 @@ model SupportTicketMessage {
   @@index([ticketId])
 }
 
-// Messages sent to Lady Greener itself from the marketing site (support form and
-// demo / contact request). Platform-level, so deliberately not tied to a
-// business. Strings rather than enums so a new kind or status needs no migration:
+// Messages sent through the public site's contact form (kind SUPPORT, or DEMO
+// for a demo request). Deliberately not tied to a business row. Strings rather than enums so a new kind or status needs no migration:
 // kind: SUPPORT | DEMO     status: NEW | IN_PROGRESS | RESOLVED | SPAM
 model PlatformInquiry {
   id         String    @id @default(cuid())
