@@ -92,7 +92,23 @@ async function getTicket(businessId, id) {
     err.status = 404;
     throw err;
   }
-  return ticket;
+  return withSla(ticket);
+}
+
+function withSla(t) {
+  return { ...t, slaState: sla.slaState(t) };
+}
+
+/** Open-ticket and SLA numbers for the last `days` days plus everything still open. */
+async function ticketStats(businessId, { days = 30 } = {}) {
+  const span = Math.max(1, Math.min(365, parseInt(days, 10) || 30));
+  const since = new Date(Date.now() - span * 24 * 60 * 60 * 1000);
+  const rows = await prisma.supportTicket.findMany({
+    where: { businessId, OR: [{ createdAt: { gte: since } }, { status: { notIn: ['RESOLVED', 'CLOSED'] } }] },
+    select: { status: true, priority: true, kind: true, category: true, createdAt: true, dueAt: true, firstResponseAt: true, resolvedAt: true },
+    take: 5000,
+  });
+  return { days: span, ...sla.summarise(rows) };
 }
 
 async function createTicket(businessId, actorUserId, body) {
