@@ -88,6 +88,13 @@ async function assertNoCustomerConflict(businessId, customerId, start, end, excl
   }
 }
 
+/** Travel-fee columns for a new booking, from a lib/pricing quote. */
+function travelFeeFields(quote) {
+  const cents = quote && quote.breakdown && quote.breakdown.travelFeeCents;
+  if (!(cents > 0)) return {};
+  return { travelFeeCents: cents, travelDistanceMeters: quote.breakdown.travelDistanceMeters ?? null };
+}
+
 async function createBooking(businessId, actorUserId, payload) {
   const {
     customerId, serviceId, addressLine1, addressLine2, city, state, latitude, longitude,
@@ -107,7 +114,7 @@ async function createBooking(businessId, actorUserId, payload) {
     throw err;
   }
   const pricing = require('../../lib/pricing');
-  const quote = await pricing.calculateQuote(service, { businessId, sqft, rooms, addOnIds, frequency, customDurationMinutes: service.estimatedMinutes, couponCode });
+  const quote = await pricing.calculateQuote(service, { businessId, sqft, rooms, addOnIds, frequency, customDurationMinutes: service.estimatedMinutes, couponCode, latitude, longitude });
 
   const start = new Date(scheduledStart);
   const end = new Date(start.getTime() + (quote.breakdown.estimatedMinutes || service.estimatedMinutes) * 60 * 1000);
@@ -136,7 +143,7 @@ async function createBooking(businessId, actorUserId, payload) {
         }
       }
 
-      const b = await tx.booking.create({ data: { businessId, customerId, serviceId, addressLine1, addressLine2, city, state, latitude, longitude, accessCode, keyLocation, parkingInstructions, petNotes, specialInstructions, scheduledStart: start, scheduledEnd: end, quotedPriceCents: quote.priceCents, status: 'REQUESTED', couponId: coupon.id } });
+      const b = await tx.booking.create({ data: { businessId, customerId, serviceId, addressLine1, addressLine2, city, state, latitude, longitude, accessCode, keyLocation, parkingInstructions, petNotes, specialInstructions, scheduledStart: start, scheduledEnd: end, quotedPriceCents: quote.priceCents, ...travelFeeFields(quote), status: 'REQUESTED', couponId: coupon.id } });
 
       // attempt to increment redeemedCount with maxRedemptions enforcement
       if (coupon.maxRedemptions) {
@@ -157,7 +164,7 @@ async function createBooking(businessId, actorUserId, payload) {
     return booking;
   }
 
-  const booking = await prisma.booking.create({ data: { businessId, customerId, serviceId, addressLine1, addressLine2, city, state, latitude, longitude, accessCode, keyLocation, parkingInstructions, petNotes, specialInstructions, scheduledStart: start, scheduledEnd: end, quotedPriceCents: quote.priceCents, status: 'REQUESTED' } });
+  const booking = await prisma.booking.create({ data: { businessId, customerId, serviceId, addressLine1, addressLine2, city, state, latitude, longitude, accessCode, keyLocation, parkingInstructions, petNotes, specialInstructions, scheduledStart: start, scheduledEnd: end, quotedPriceCents: quote.priceCents, ...travelFeeFields(quote), status: 'REQUESTED' } });
 
   await audit({ businessId, actorUserId, action: 'BOOKING_CREATED', entityType: 'Booking', entityId: booking.id });
   await notifications.notifyBookingCreated(businessId, booking);

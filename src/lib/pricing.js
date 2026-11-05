@@ -1,4 +1,5 @@
 const prisma = require('../config/database');
+const { travelFeeFor } = require('./travelFee');
 const DEFAULTS = {
   perSqftCents: 10, // 10 cents per sqft
   perRoomCents: 1500, // $15 per room
@@ -49,7 +50,7 @@ function applyFrequencyDiscount(priceCents, frequency) {
 }
 
 async function calculateQuote(service, payload = {}) {
-  const { businessId, addOnIds = [], frequency, couponCode, giftCardCode } = payload;
+  const { businessId, addOnIds = [], frequency, couponCode, giftCardCode, latitude, longitude } = payload;
   let couponInfo;
   let giftCardInfo;
 
@@ -123,6 +124,15 @@ async function calculateQuote(service, payload = {}) {
     }
   }
 
+  // Travel fee: added after the coupon so a promo does not discount the drive,
+  // and before the gift card so the card is capped at the real amount owed.
+  // Never throws (see lib/travelFee): a failure just means no fee.
+  let travelFee = { enabled: false, cents: 0, distanceMeters: null };
+  if (businessId && bp) {
+    travelFee = await travelFeeFor(businessId, bp, { latitude, longitude });
+    total += travelFee.cents;
+  }
+
   // Preview a gift card's applicability without touching its balance —
   // actual redemption (the atomic decrement) happens at booking time in
   // widget.service.applyGiftCardToBooking, same preview/redeem split as
@@ -159,11 +169,14 @@ async function calculateQuote(service, payload = {}) {
     base,
     addOnTotal,
     frequency: frequency || null,
+    travelFeeCents: travelFee.cents,
+    travelDistanceMeters: travelFee.distanceMeters,
     total,
     estimatedMinutes,
   };
 
   const result = { priceCents: total, breakdown };
+  if (travelFee.enabled) result.travelFee = travelFee;
   if (typeof couponInfo !== 'undefined') result.coupon = couponInfo;
   if (typeof giftCardInfo !== 'undefined') result.giftCard = giftCardInfo;
   return result;

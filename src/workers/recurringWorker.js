@@ -42,8 +42,12 @@ async function buildOccurrence(s, address, template, start) {
   // Only add-ons that still exist on the service are carried forward.
   const currentAddOns = (s.service.addOns || []).filter((a) => templateAddOnIds.includes(a.id));
 
+  const lat = firstDefined(address.latitude, template && template.latitude);
+  const lng = firstDefined(address.longitude, template && template.longitude);
   const quote = await pricing.calculateQuote(s.service, {
     businessId: s.businessId,
+    latitude: lat,
+    longitude: lng,
     addOnIds: currentAddOns.map((a) => a.id),
     rooms: homeDetails.rooms,
     bathrooms: homeDetails.bathrooms,
@@ -88,6 +92,8 @@ async function buildOccurrence(s, address, template, start) {
       scheduledStart: start,
       scheduledEnd: end,
       quotedPriceCents: quote.priceCents,
+      travelFeeCents: quote.breakdown && quote.breakdown.travelFeeCents > 0 ? quote.breakdown.travelFeeCents : null,
+      travelDistanceMeters: quote.breakdown && quote.breakdown.travelFeeCents > 0 ? quote.breakdown.travelDistanceMeters : null,
       status: 'REQUESTED',
       paymentStatus: 'UNPAID',
     },

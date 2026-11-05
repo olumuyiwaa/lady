@@ -28,7 +28,7 @@ function formatNumber(issuedAt, sequence, timeZone) {
   return `${year}-${pad(sequence, 5)}`;
 }
 
-function buildLines(booking, rateBps) {
+function buildLines(booking, rateBps, totals) {
   const addOns = Array.isArray(booking.addOns) ? booking.addOns : [];
   const description = addOns.length
     ? `${booking.service.name} (incl. ${addOns.map((a) => a.name).join(', ')})`
@@ -36,7 +36,26 @@ function buildLines(booking, rateBps) {
   // One line for the whole amount the customer was quoted. Discounts, add-ons
   // and frequency pricing are already folded into quotedPriceCents; splitting
   // it into lines here would mean inventing numbers.
-  return [{ description, quantity: 1, ...splitGross(booking.quotedPriceCents, rateBps) }];
+  const travel = Math.min(Math.max(booking.travelFeeCents || 0, 0), booking.quotedPriceCents);
+  if (!(travel > 0) || !totals) {
+    return [{ description, quantity: 1, ...splitGross(booking.quotedPriceCents, rateBps) }];
+  }
+  // Travel is its own line, as customers expect. The service line is the
+  // remainder of the invoice totals, so the lines always add up to the
+  // totals to the cent (splitting two grosses separately can differ by 1 cent).
+  const t = splitGross(travel, rateBps);
+  const km = booking.travelDistanceMeters != null ? ` (${(booking.travelDistanceMeters / 1000).toFixed(1).replace('.', ',')} km)` : '';
+  return [
+    {
+      description,
+      quantity: 1,
+      netCents: totals.netCents - t.netCents,
+      vatCents: totals.vatCents - t.vatCents,
+      grossCents: totals.grossCents - t.grossCents,
+      vatRateBps: rateBps,
+    },
+    { description: `Reiskosten / Travel${km}`, quantity: 1, ...t },
+  ];
 }
 
 async function issueForBooking(businessId, bookingId, actorUserId) {
@@ -59,7 +78,7 @@ async function issueForBooking(businessId, bookingId, actorUserId) {
   const address = await prisma.businessAddress.findFirst({ where: { businessId }, orderBy: { createdAt: 'asc' } });
   const rateBps = vatRateFor(booking.service, b);
   const totals = splitGross(booking.quotedPriceCents, rateBps);
-  const lines = buildLines(booking, rateBps);
+  const lines = buildLines(booking, rateBps, totals);
   const timeZone = b.timezone || 'Europe/Amsterdam';
 
   const supplier = {

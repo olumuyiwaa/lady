@@ -331,6 +331,12 @@ model BusinessPricing {
   // instead of being stuck on the same rate as every other tenant.
   perSqftCents Int?
   perRoomCents Int?
+  // Travel fee: the first travelFreeKm around the business's base are free,
+  // each further km costs travelFeePerKmCents, capped at travelFeeMaxCents.
+  // null travelFeePerKmCents = no travel fee (today's behaviour).
+  travelFreeKm       Int?
+  travelFeePerKmCents Int?
+  travelFeeMaxCents  Int?
   // perSqftCents is unit-agnostic rate math ("per unit") despite the name —
   // this just controls what unit the frontend collects from the customer
   // and labels the quote with. Default SQM since most tenants are NL-based;
@@ -1019,6 +1025,10 @@ model Booking {
   scheduledEnd            DateTime
   status                  BookingStatus      @default(REQUESTED)
   quotedPriceCents        Int
+  // The travel-fee part of quotedPriceCents (VAT-inclusive) and the distance it was
+  // charged for. Null when no travel fee applied.
+  travelFeeCents          Int?
+  travelDistanceMeters    Int?
   couponId                String?
   coupon                  Coupon?            @relation(fields: [couponId], references: [id])
   // Independent of couponId — a booking can use a coupon and a gift card

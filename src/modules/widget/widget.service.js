@@ -416,6 +416,8 @@ async function quote(businessId, {
   const quote = await pricing.calculateQuote(service, {
     businessId,
     addOnIds,
+    latitude: coords.latitude,
+    longitude: coords.longitude,
     scheduledStart,
     couponCode,
     giftCardCode,
@@ -459,6 +461,8 @@ async function quote(businessId, {
     priceCents: quote.priceCents,
     estimatedMinutes: quote.breakdown.estimatedMinutes,
     breakdown: quote.breakdown,
+    // Present when the business charges for travel: { cents, distanceKm, freeKm, perKmCents, ... }
+    travelFee: quote.travelFee,
     coupon: quote.coupon,
     giftCard: quote.giftCard,
     depositRequiredCents: depositRequiredCents || 0,
@@ -509,6 +513,8 @@ function buildBookingData({ businessId, customerId, serviceId, payload, q, start
     scheduledStart: start,
     scheduledEnd: end,
     quotedPriceCents: priceCents,
+    travelFeeCents: q.breakdown && q.breakdown.travelFeeCents > 0 ? q.breakdown.travelFeeCents : null,
+    travelDistanceMeters: q.breakdown && q.breakdown.travelFeeCents > 0 ? q.breakdown.travelDistanceMeters : null,
     status: 'REQUESTED',
     ...extra,
   };

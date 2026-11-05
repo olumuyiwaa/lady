@@ -56,7 +56,7 @@ async function getPricing(businessId) {
   if (!p) {
     // return defaults shape — perSqftCents/perRoomCents null here means
     // "not set", which lib/pricing.js reads as "use the platform DEFAULTS"
-    return { businessId, frequencyDiscounts: null, perSqftCents: null, perRoomCents: null };
+    return { businessId, frequencyDiscounts: null, perSqftCents: null, perRoomCents: null, travelFreeKm: null, travelFeePerKmCents: null, travelFeeMaxCents: null };
   }
   return p;
 }
