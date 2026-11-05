@@ -619,10 +619,10 @@ async function getOverview(businessId, customerId, portalUserId) {
     require('../bookingChat/bookingChat.service').unreadForCustomer(businessId, customerId, portalUserId),
   ]);
   const preferred = mine.cleaners.find((c) => c.id === mine.preferredCleanerId) || null;
-  const acct = await prisma.customer.findFirst({
-    where: { id: customerId, businessId },
-    select: { companyName: true, paymentTermsDays: true },
-  });
+  // Never let the business-account lookup take the whole home panel down.
+  const acct = await prisma.customer
+    .findFirst({ where: { id: customerId, businessId }, select: { companyName: true, paymentTermsDays: true } })
+    .catch(() => null);
   return {
     company: acct && acct.companyName ? { name: acct.companyName, paymentTermsDays: acct.paymentTermsDays } : null,
     nextBooking: next,
