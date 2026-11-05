@@ -128,7 +128,16 @@ async function getStripeStatus(req, res, next) {
   }
 }
 
+async function updateLocation(req, res, next) {
+  try {
+    return success(res, 200, await service.updateMyLocation(req.cleaner, req.body));
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
+  updateLocation,
   getProfile,
   updateProfile,
   avatarUploadUrl,

@@ -17,6 +17,8 @@ router.get('/suggest', requireRole('BUSINESS_OWNER', 'BUSINESS_MANAGER'), requir
 // Basic route/travel-time awareness for one cleaner's day — same "smart
 // dispatch" plan tier as /suggest above, not a separate feature flag.
 router.get('/route/:cleanerId', requireRole('BUSINESS_OWNER', 'BUSINESS_MANAGER'), requirePlanFeature('autoDispatch', 'Route awareness'), controller.getCleanerDayRoute);
+// Live map: cleaner positions + jobs around now. Registered before '/:id'.
+router.get('/live', requireRole('BUSINESS_OWNER', 'BUSINESS_MANAGER'), controller.live);
 router.post('/', requireRole('BUSINESS_OWNER', 'BUSINESS_MANAGER'), controller.createAssignment);
 router.get('/:id', requireRole('BUSINESS_OWNER', 'BUSINESS_MANAGER'), controller.getAssignment);
 router.delete('/:id', requireRole('BUSINESS_OWNER', 'BUSINESS_MANAGER'), controller.removeAssignment);

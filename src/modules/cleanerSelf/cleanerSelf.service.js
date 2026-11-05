@@ -220,3 +220,27 @@ async function registerDeviceToken(cleaner, { token, platform }) {
 async function unregisterDeviceToken(cleaner, token) {
   await prisma.cleanerDeviceToken.deleteMany({ where: { cleanerId: cleaner.id, token } });
 }
+
+/**
+ * Location ping from the cleaner app. Feeds the dispatch live map and ETA
+ * ranking. Out-of-range coordinates are rejected; pings closer than 15 s to the
+ * previous one are ignored so a chatty client cannot hammer the database.
+ */
+async function updateMyLocation(cleaner, { latitude, longitude }) {
+  const lat = Number(latitude);
+  const lng = Number(longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+    const err = new Error('Invalid coordinates');
+    err.status = 422;
+    throw err;
+  }
+  const last = cleaner.lastKnownAt ? new Date(cleaner.lastKnownAt).getTime() : 0;
+  if (Date.now() - last < 15 * 1000) return { updated: false };
+  await prisma.cleanerProfile.update({
+    where: { id: cleaner.id },
+    data: { lastKnownLat: lat, lastKnownLng: lng, lastKnownAt: new Date() },
+  });
+  return { updated: true };
+}
+
+module.exports.updateMyLocation = updateMyLocation;

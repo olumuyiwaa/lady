@@ -30,6 +30,7 @@
  *   GET  /cleaners/me/documents/:id/download-url
  *   POST   /cleaners/me/device-token          { token, platform? }
  *   DELETE /cleaners/me/device-token          { token }
+ *   POST /cleaners/me/location               { latitude, longitude } live position ping (dispatch map)
  *   GET  /cleaners/me/earnings                real payroll figures (see payroll module) — replaces the
  *                                              client-side estimate the Flutter app used to compute
  *   GET  /cleaners/me/stripe/status           Stripe Connect onboarding/payouts status
@@ -91,6 +92,13 @@ router.post(
   controller.registerDeviceToken
 );
 router.delete('/me/device-token', [body('token').notEmpty()], validate, controller.unregisterDeviceToken);
+
+router.post(
+  '/me/location',
+  [body('latitude').isFloat({ min: -90, max: 90 }), body('longitude').isFloat({ min: -180, max: 180 })],
+  validate,
+  controller.updateLocation
+);
 
 router.get('/me/earnings', controller.getEarnings);
 
