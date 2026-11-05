@@ -42,6 +42,10 @@ function portalRoutesFor(resolveBusiness) {
   router.get('/bookings', controller.listBookings);
   router.get('/bookings/:id/timeline', controller.getTimeline);
   router.get('/complaints', controller.listComplaints);
+  // Business accounts only (403 otherwise, enforced in b2b.service).
+  router.get('/b2b/summary', controller.b2bSummary);
+  router.get('/b2b/export.csv', controller.b2bExportCsv);
+  router.get('/b2b/statement/html', controller.b2bStatementHtml);
   router.post(
     '/bookings/:id/complaint',
     [body('category').optional().isString(), body('description').isString().isLength({ min: 10, max: 2000 })],

@@ -91,9 +91,16 @@ async function issueForBooking(businessId, bookingId, actorUserId) {
       ? { line1: address.line1, line2: address.line2 || null, postalCode: address.postalCode, city: address.city, country: address.country }
       : null,
   };
+  const b2b = require('../../lib/b2bAccount');
   const customer = {
-    name: [booking.customer.firstName, booking.customer.lastName].filter(Boolean).join(' '),
-    email: booking.customer.email || null,
+    name: b2b.invoiceName(booking.customer),
+    // Contact person on a company invoice ("t.a.v.").
+    attn: b2b.isBusinessAccount(booking.customer)
+      ? [booking.customer.firstName, booking.customer.lastName].filter(Boolean).join(' ') || null
+      : null,
+    kvkNumber: booking.customer.kvkNumber || null,
+    vatNumber: booking.customer.vatNumber || null,
+    email: booking.customer.billingEmail || booking.customer.email || null,
     address: {
       line1: booking.addressLine1,
       line2: booking.addressLine2 || null,
@@ -128,6 +135,7 @@ async function issueForBooking(businessId, bookingId, actorUserId) {
           customerSnapshot: customer,
           lines,
           issuedAt,
+          dueAt: booking.paymentStatus === 'PAID' ? null : b2b.dueDateFor(booking.customer, issuedAt),
           // Paid up front (card/iDEAL/gift card) -> mark paid.
           paidAt: booking.paymentStatus === 'PAID' ? issuedAt : null,
         },
@@ -219,9 +227,9 @@ function renderInvoiceHtml(inv, timeZone = 'Europe/Amsterdam') {
   .cols{display:flex;justify-content:space-between;gap:24px} .tot td{border:0} .tot .b{font-weight:700}
   @media print{body{margin:0}}
 </style></head><body>
-<div class="cols"><div><h1>Factuur</h1><div class="muted">Factuurnummer: <strong>${esc(inv.number)}</strong><br>Factuurdatum: ${esc(date(inv.issuedAt))}${inv.paidAt ? `<br>Betaald op: ${esc(date(inv.paidAt))}` : ''}</div></div>
+<div class="cols"><div><h1>Factuur</h1><div class="muted">Factuurnummer: <strong>${esc(inv.number)}</strong><br>Factuurdatum: ${esc(date(inv.issuedAt))}${inv.dueAt && !inv.paidAt ? `<br>Vervaldatum: ${esc(date(inv.dueAt))}` : ''}${inv.paidAt ? `<br>Betaald op: ${esc(date(inv.paidAt))}` : ''}</div></div>
 <div class="r"><strong>${esc(s.name)}</strong>${s.tradeName ? `<br>${esc(s.tradeName)}` : ''}${addressLines(s.address).map((l) => `<br>${esc(l)}`).join('')}<br>KvK: ${esc(s.kvkNumber)}<br>BTW-id: ${esc(s.vatNumber)}${s.iban ? `<br>IBAN: ${esc(s.iban)}` : ''}</div></div>
-<p><strong>Factuur aan</strong><br>${esc(c.name)}${addressLines(c.address).map((l) => `<br>${esc(l)}`).join('')}${c.email ? `<br>${esc(c.email)}` : ''}</p>
+<p><strong>Factuur aan</strong><br>${esc(c.name)}${c.attn ? `<br>t.a.v. ${esc(c.attn)}` : ''}${addressLines(c.address).map((l) => `<br>${esc(l)}`).join('')}${c.kvkNumber ? `<br>KvK: ${esc(c.kvkNumber)}` : ''}${c.vatNumber ? `<br>BTW-id: ${esc(c.vatNumber)}` : ''}${c.email ? `<br>${esc(c.email)}` : ''}</p>
 <table><thead><tr><th>Omschrijving</th><th class="r">Aantal</th><th class="r">Excl. BTW</th><th class="r">BTW</th><th class="r">Incl. BTW</th></tr></thead><tbody>${rows}</tbody></table>
 <table class="tot" style="width:auto;margin-left:auto"><tr><td>Totaal excl. BTW</td><td class="r">${money(inv.netCents, inv.currency)}</td></tr><tr><td>BTW ${esc(rate)}</td><td class="r">${money(inv.vatCents, inv.currency)}</td></tr><tr class="b"><td class="b">Totaal incl. BTW</td><td class="r b">${money(inv.grossCents, inv.currency)}</td></tr></table>
 </body></html>`;

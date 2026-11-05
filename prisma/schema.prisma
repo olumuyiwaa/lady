@@ -812,6 +812,14 @@ model Customer {
   // Plain id, no relation: it is checked in code and never blocks deleting a
   // cleaner. Dispatch suggestions rank this cleaner first when available.
   preferredCleanerId String?
+  // Business account details (see lib/b2bAccount.js). A customer with a
+  // company name is a B2B account: invoices are addressed to the company and
+  // are due after `paymentTermsDays`; the portal shows the business view.
+  companyName      String?
+  kvkNumber        String?
+  vatNumber        String?
+  billingEmail     String?
+  paymentTermsDays Int?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 

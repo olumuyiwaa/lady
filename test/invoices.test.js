@@ -87,6 +87,21 @@ describe('issueForBooking', () => {
     expect(audit).toHaveBeenCalledWith(expect.objectContaining({ action: 'INVOICE_ISSUED' }));
   });
 
+  test('a business account is invoiced under its company name, with VAT/KvK and a due date', async () => {
+    const bk = booking();
+    prisma.booking.findFirst.mockResolvedValue({
+      ...bk,
+      paymentStatus: 'UNPAID',
+      customer: { ...bk.customer, companyName: 'Acme BV', kvkNumber: '12345678', vatNumber: 'NL123456789B01', billingEmail: 'ap@acme.nl', paymentTermsDays: 30 },
+    });
+    await svc.issueForBooking('biz', 'bk1', 'u1');
+    const data = prisma.invoice.create.mock.calls.at(-1)[0].data;
+    expect(data.customerSnapshot).toMatchObject({ name: 'Acme BV', kvkNumber: '12345678', vatNumber: 'NL123456789B01', email: 'ap@acme.nl' });
+    expect(data.customerSnapshot.attn).toBeTruthy();
+    expect(data.dueAt.getTime() - data.issuedAt.getTime()).toBe(30 * 24 * 3600 * 1000);
+    expect(data.paidAt).toBeNull();
+  });
+
   test('is idempotent: an existing invoice is returned untouched, no number is consumed', async () => {
     prisma.invoice.findFirst.mockResolvedValue({ id: 'existing' });
     await expect(svc.issueForBooking('biz', 'bk1', 'u1')).resolves.toEqual({ id: 'existing' });

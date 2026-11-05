@@ -25,6 +25,7 @@ async function listCustomers(businessId, { q, take = 200 } = {}) {
 
 async function createCustomer(businessId, actorUserId, payload) {
   const { firstName, lastName, email, notes, address } = payload;
+  const b2b = require('../../lib/b2bAccount').cleanB2bFields(payload);
   const phone = normalizePhone(payload.phone);
   // The unique index only catches byte-identical numbers; check every format.
   if (await findCustomerByPhone(prisma, businessId, phone)) {
@@ -40,6 +41,7 @@ async function createCustomer(businessId, actorUserId, payload) {
       email: email || null,
       phone,
       notes: notes || null,
+      ...b2b,
       ...(address
         ? {
             addresses: {
@@ -130,6 +132,7 @@ async function updateCustomer(businessId, id, actorUserId, patch) {
   for (const k of allowed) {
     if (patch[k] !== undefined) data[k] = patch[k];
   }
+  Object.assign(data, require('../../lib/b2bAccount').cleanB2bFields(patch));
   if (data.phone !== undefined) {
     data.phone = normalizePhone(data.phone);
     const clash = await findCustomerByPhone(prisma, businessId, data.phone);

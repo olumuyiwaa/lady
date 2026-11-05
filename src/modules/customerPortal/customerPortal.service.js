@@ -619,7 +619,12 @@ async function getOverview(businessId, customerId, portalUserId) {
     require('../bookingChat/bookingChat.service').unreadForCustomer(businessId, customerId, portalUserId),
   ]);
   const preferred = mine.cleaners.find((c) => c.id === mine.preferredCleanerId) || null;
+  const acct = await prisma.customer.findFirst({
+    where: { id: customerId, businessId },
+    select: { companyName: true, paymentTermsDays: true },
+  });
   return {
+    company: acct && acct.companyName ? { name: acct.companyName, paymentTermsDays: acct.paymentTermsDays } : null,
     nextBooking: next,
     counts: { upcoming, completed, total },
     unreadMessages,

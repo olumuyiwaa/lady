@@ -119,6 +119,29 @@ const listMyCleaners = handler((req) => service.listMyCleaners(req.businessId, r
 const setPreferredCleaner = handler((req) =>
   service.setPreferredCleaner(req.businessId, req.portalCustomerId, req.body.cleanerId || null)
 );
+const b2bService = require('../b2b/b2b.service');
+const b2bSummary = handler((req) => b2bService.getSummary(req.businessId, req.portalCustomerId, req.query.month));
+async function b2bExportCsv(req, res, next) {
+  try {
+    const csv = await b2bService.exportVisitsCsv(req.businessId, req.portalCustomerId, { from: req.query.from, to: req.query.to });
+    res.set('Content-Type', 'text/csv; charset=utf-8');
+    res.set('Content-Disposition', 'attachment; filename="visits.csv"');
+    res.set('Cache-Control', 'no-store');
+    return res.send(csv);
+  } catch (err) {
+    next(err);
+  }
+}
+async function b2bStatementHtml(req, res, next) {
+  try {
+    const html = await b2bService.renderStatementHtml(req.businessId, req.portalCustomerId, req.query.month);
+    res.set('Content-Type', 'text/html; charset=utf-8');
+    res.set('Cache-Control', 'no-store');
+    return res.send(html);
+  } catch (err) {
+    next(err);
+  }
+}
 const complaints = require('../supportTickets/complaints.service');
 const createComplaint = handler((req) => complaints.createComplaint(req.businessId, req.portalCustomerId, req.params.id, req.body), 201);
 const listComplaints = handler((req) => complaints.listMyComplaints(req.businessId, req.portalCustomerId));
@@ -129,6 +152,9 @@ const listMessages = handler((req) =>
 const postMessage = handler((req) => chat.postMessage(req.businessId, req.params.id, party(req), req.body), 201);
 
 module.exports = {
+  b2bSummary,
+  b2bExportCsv,
+  b2bStatementHtml,
   createComplaint,
   listComplaints,
   getOverview,
