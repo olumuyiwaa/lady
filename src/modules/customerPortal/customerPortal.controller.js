@@ -123,7 +123,7 @@ const b2bService = require('../b2b/b2b.service');
 const b2bSummary = handler((req) => b2bService.getSummary(req.businessId, req.portalCustomerId, req.query.month));
 async function b2bExportCsv(req, res, next) {
   try {
-    const csv = await b2bService.exportVisitsCsv(req.businessId, req.portalCustomerId, { from: req.query.from, to: req.query.to });
+    const csv = await b2bService.exportVisitsCsv(req.businessId, req.portalCustomerId, { from: req.query.from, to: req.query.to, month: req.query.month });
     res.set('Content-Type', 'text/csv; charset=utf-8');
     res.set('Content-Disposition', 'attachment; filename="visits.csv"');
     res.set('Cache-Control', 'no-store');

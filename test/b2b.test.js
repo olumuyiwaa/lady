@@ -104,6 +104,10 @@ describe('service access and exports', () => {
     expect(lines[1]).toContain('Office');
     expect(lines[1]).toContain('100.00');
     expect(lines[1]).toContain('no');
+    await svc.exportVisitsCsv('biz', 'c', { month: '2026-11' });
+    const w = prisma.booking.findMany.mock.calls.at(-1)[0].where.scheduledStart;
+    expect(w.gte.toISOString()).toBe('2026-10-31T23:00:00.000Z');
+    expect(w.lt.toISOString()).toBe('2026-11-30T23:00:00.000Z');
     await expect(svc.exportVisitsCsv('biz', 'c', { from: 'x', to: 'y' })).rejects.toMatchObject({ status: 422 });
     await expect(svc.exportVisitsCsv('biz', 'c', { from: '2024-01-01', to: '2026-01-01' })).rejects.toMatchObject({ status: 422 });
   });

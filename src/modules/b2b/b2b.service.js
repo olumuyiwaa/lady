@@ -100,10 +100,16 @@ async function getSummary(businessId, customerId, month) {
 }
 
 /** CSV of visits between two dates (inclusive of `from`, exclusive of `to`). */
-async function exportVisitsCsv(businessId, customerId, { from, to }) {
+async function exportVisitsCsv(businessId, customerId, { from, to, month }) {
   const { timeZone } = await loadAccount(businessId, customerId);
-  const start = from ? new Date(from) : null;
-  const end = to ? new Date(to) : null;
+  let start = from ? new Date(from) : null;
+  let end = to ? new Date(to) : null;
+  if (month && !from && !to) {
+    // A whole calendar month in the business timezone.
+    const r = b2b.monthRange(month, timeZone);
+    start = r.from;
+    end = r.to;
+  }
   if (!start || !end || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) throw httpError(422, 'Choose a valid date range');
   if (end - start > 400 * 24 * 3600 * 1000) throw httpError(422, 'Date range is too long (max 400 days)');
 
