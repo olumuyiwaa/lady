@@ -41,6 +41,13 @@ function portalRoutesFor(resolveBusiness) {
 
   router.get('/bookings', controller.listBookings);
   router.get('/bookings/:id/timeline', controller.getTimeline);
+  router.get('/complaints', controller.listComplaints);
+  router.post(
+    '/bookings/:id/complaint',
+    [body('category').optional().isString(), body('description').isString().isLength({ min: 10, max: 2000 })],
+    validate,
+    controller.createComplaint
+  );
   router.get('/bookings/:id/messages', controller.listMessages);
   router.post(
     '/bookings/:id/messages',

@@ -3,6 +3,7 @@ const logger = require('../../config/logger');
 const { audit } = require('../../utils/audit');
 const { oneLine, referenceFromId, sendTracked } = require('../../lib/contactMail');
 const notifications = require('../notifications/notifications.service');
+const sla = require('../../lib/ticketSla');
 
 // A visitor can submit the public contact form at most this many times per
 // address, per business, per day (on top of the per-IP limiter and captcha).
@@ -39,12 +40,13 @@ async function resolveOwnedRefs(businessId, { customerId, bookingId }) {
 // Anonymised customers keep a 'deleted-<id>' placeholder in the phone column.
 const usablePhone = (p) => (p && !String(p).startsWith('deleted-') ? p : null);
 
-async function listTickets(businessId, { status, priority, q, page = 1, limit = 20 } = {}) {
+async function listTickets(businessId, { status, priority, kind, q, page = 1, limit = 20 } = {}) {
   const take = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 100);
   const skip = (Math.max(parseInt(page, 10) || 1, 1) - 1) * take;
   const where = { businessId };
   if (status) where.status = status;
   if (priority) where.priority = priority;
+  if (kind === 'COMPLAINT') where.kind = 'COMPLAINT';
   if (q) {
     where.OR = [
       { subject: { contains: q, mode: 'insensitive' } },
@@ -68,7 +70,7 @@ async function listTickets(businessId, { status, priority, q, page = 1, limit = 
   ]);
 
   return {
-    data: tickets,
+    data: tickets.map(withSla),
     pagination: {
       page: Math.max(parseInt(page, 10) || 1, 1),
       limit: take,
@@ -112,6 +114,7 @@ async function createTicket(businessId, actorUserId, body) {
       contactEmail: (oneLine(body.contactEmail, 254) || customer?.email || '').toLowerCase() || null,
       contactPhone: oneLine(body.contactPhone, 40) || usablePhone(customer?.phone) || null,
       status: 'OPEN',
+      dueAt: sla.dueAtFor(body.priority || 'MEDIUM'),
     },
   });
   await audit({
@@ -147,8 +150,13 @@ async function updateTicket(businessId, id, actorUserId, body) {
   if (body.contactName !== undefined) data.contactName = oneLine(body.contactName, 100) || null;
   if (body.contactEmail !== undefined) data.contactEmail = oneLine(body.contactEmail, 254).toLowerCase() || null;
   if (body.contactPhone !== undefined) data.contactPhone = oneLine(body.contactPhone, 40) || null;
+  if (body.priority !== undefined && body.priority !== existing.priority) {
+    data.dueAt = sla.dueAtFor(body.priority, existing.createdAt);
+  }
   if (body.status === 'RESOLVED' || body.status === 'CLOSED') {
     data.resolvedAt = new Date();
+  } else if (body.status !== undefined && existing.resolvedAt) {
+    data.resolvedAt = null; // reopened
   }
 
   const ticket = await prisma.supportTicket.update({ where: { id }, data });
@@ -204,6 +212,7 @@ async function addMessage(businessId, ticketId, actorUserId, { body, isInternal 
     where: { id: ticketId },
     data: {
       updatedAt: new Date(),
+      ...(!isInternal && !ticket.firstResponseAt ? { firstResponseAt: new Date() } : {}),
       ...(ticket.status === 'WAITING_ON_CUSTOMER' && !isInternal
         ? { status: 'IN_PROGRESS' }
         : {}),
@@ -256,6 +265,7 @@ async function createWebsiteTicket(business, { name, email, phone, message }) {
       contactEmail,
       contactPhone,
       status: 'OPEN',
+      dueAt: sla.dueAtFor('MEDIUM'),
     },
   });
   const reference = referenceFromId(ticket.id);
@@ -347,4 +357,6 @@ module.exports = {
   addMessage,
   deleteTicket,
   createWebsiteTicket,
+  ticketStats,
+  staffRecipients,
 };

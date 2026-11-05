@@ -6,6 +6,7 @@ async function list(req, res, next) {
     const data = await service.listTickets(req.businessId, {
       status: req.query.status,
       priority: req.query.priority,
+      kind: req.query.kind,
       q: req.query.q,
       page: req.query.page,
       limit: req.query.limit,
@@ -61,4 +62,13 @@ async function remove(req, res, next) {
   }
 }
 
-module.exports = { list, get, create, update, addMessage, remove };
+async function stats(req, res, next) {
+  try {
+    return success(res, 200, await service.ticketStats(req.businessId, { days: req.query.days }));
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = {
+  stats, list, get, create, update, addMessage, remove };

@@ -1346,6 +1346,13 @@ model SupportTicket {
   contactPhone String?
   // 'WEBSITE' for the public contact form, null when staff created it.
   source       String?
+  // 'COMPLAINT' for tickets a customer raised about a visit, null otherwise.
+  kind         String?
+  // The cleaner on the booking a complaint is about (plain id, no relation).
+  cleanerId    String?
+  // SLA: when it should be resolved by, and when staff first answered.
+  dueAt           DateTime?
+  firstResponseAt DateTime?
   resolvedAt  DateTime?
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
@@ -1354,6 +1361,8 @@ model SupportTicket {
 
   @@index([businessId])
   @@index([businessId, status])
+  @@index([businessId, kind])
+  @@index([bookingId])
 }
 
 model SupportTicketMessage {

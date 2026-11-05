@@ -17,6 +17,8 @@ const contactValidators = [
 router.use(authenticate, scopeToBusiness);
 
 router.get('/', requireRole('BUSINESS_OWNER', 'BUSINESS_MANAGER'), controller.list);
+// Before '/:id' so 'stats' is not read as an id.
+router.get('/stats', requireRole('BUSINESS_OWNER', 'BUSINESS_MANAGER'), controller.stats);
 router.post(
   '/',
   requireRole('BUSINESS_OWNER', 'BUSINESS_MANAGER'),

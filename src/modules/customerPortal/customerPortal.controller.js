@@ -119,6 +119,9 @@ const listMyCleaners = handler((req) => service.listMyCleaners(req.businessId, r
 const setPreferredCleaner = handler((req) =>
   service.setPreferredCleaner(req.businessId, req.portalCustomerId, req.body.cleanerId || null)
 );
+const complaints = require('../supportTickets/complaints.service');
+const createComplaint = handler((req) => complaints.createComplaint(req.businessId, req.portalCustomerId, req.params.id, req.body), 201);
+const listComplaints = handler((req) => complaints.listMyComplaints(req.businessId, req.portalCustomerId));
 const getTimeline = handler((req) => service.getMyTimeline(req.businessId, req.portalCustomerId, req.params.id));
 const listMessages = handler((req) =>
   chat.listMessages(req.businessId, req.params.id, party(req), { after: req.query.after })
@@ -126,6 +129,8 @@ const listMessages = handler((req) =>
 const postMessage = handler((req) => chat.postMessage(req.businessId, req.params.id, party(req), req.body), 201);
 
 module.exports = {
+  createComplaint,
+  listComplaints,
   getOverview,
   getReferral,
   listMyCleaners,
