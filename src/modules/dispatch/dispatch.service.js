@@ -70,9 +70,18 @@ async function createAssignment(businessId, bookingId, cleanerId, actorUserId, o
     }
     // A customer's preferred cleaner wins whenever they are available.
     const preferredId = await preferredCleanerIdFor(booking.customerId);
-    const top = (preferredId && candidates.find((c) => c.cleaner && c.cleaner.id === preferredId)) || candidates[0];
+    // Best overall fit (proximity, rating, history, workload), preferred cleaner first.
+    let ranked = candidates;
+    try {
+      ranked = await require('../../lib/matchScore').rankCandidates(businessId, booking.customerId, candidates, { preferredId });
+    } catch (e) {
+      logger.warn('match scoring failed; using scheduler order', { bookingId, error: e.message });
+    }
+    const top = (preferredId && ranked.find((c) => c.cleaner && c.cleaner.id === preferredId)) || ranked[0];
     chosenCleaner = top.cleaner.id;
     pickReason = JSON.stringify({
+      matchScore: top.matchScore,
+      matchReasons: top.matchReasons,
       distanceMeters: top.distanceMeters,
       etaSeconds: top.etaSeconds,
       locationSource: top.locationSource,
@@ -283,15 +292,22 @@ async function suggestCleaners(businessId, bookingId, limit = 5) {
       }
     }
 
-    return { id: cleaner.id, user: cleaner.user, availability: cleaner.availability, distanceMeters: distanceMetersVal, etaMinutes };
+    return { id: cleaner.id, cleaner, user: cleaner.user, availability: cleaner.availability, distanceMeters: distanceMetersVal, etaMinutes, workload: c.workload || 0 };
   }));
 
   enriched.sort((a, b) => (a.etaMinutes != null && b.etaMinutes != null) ? a.etaMinutes - b.etaMinutes : (a.distanceMeters || 0) - (b.distanceMeters || 0));
 
   // The customer's preferred cleaner (portal preference) goes first and is flagged.
   const preferredId = await preferredCleanerIdFor(booking.customerId);
-  const flagged = enriched.map((c) => ({ ...c, preferredByCustomer: !!preferredId && c.id === preferredId }));
-  flagged.sort((a, b) => Number(b.preferredByCustomer) - Number(a.preferredByCustomer));
-  return flagged.slice(0, limit);
+  let ranked = enriched;
+  try {
+    ranked = await require('../../lib/matchScore').rankCandidates(businessId, booking.customerId, enriched, { preferredId });
+  } catch (e) {
+    logger.warn('match scoring failed; using travel order', { bookingId, error: e.message });
+  }
+  return ranked
+    .map(({ cleaner, ...c }) => ({ ...c, preferredByCustomer: !!preferredId && c.id === preferredId }))
+    .sort((a, b) => Number(b.preferredByCustomer) - Number(a.preferredByCustomer))
+    .slice(0, limit);
 }
 
