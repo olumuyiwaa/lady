@@ -35,8 +35,11 @@ function summarise(bookings, coupons, now = Date.now()) {
   const byStatus = (st) => coupons.filter((c) => rewardStatus(c, now) === st);
   const perReferrer = new Map();
   for (const b of live) perReferrer.set(b.referredByCustomerId, (perReferrer.get(b.referredByCustomerId) || 0) + 1);
+  const rewarded = new Set(coupons.map((c) => c.sourceBookingId).filter(Boolean));
   return {
     referrals: live.length,
+    // Promised to referrers but not yet earned (visit not done, or in the hold period).
+    rewardsPendingCents: sum(live.filter((b) => b.id && !rewarded.has(b.id)), (b) => b.referralRewardCents),
     completed: live.filter((b) => b.status === 'COMPLETED').length,
     discountGivenCents: sum(live, (b) => b.referralDiscountCents),
     rewardsIssuedCents: sum(coupons.filter((c) => rewardStatus(c, now) !== 'CANCELLED'), (c) => c.value),
@@ -46,6 +49,19 @@ function summarise(bookings, coupons, now = Date.now()) {
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5)
       .map(([customerId, count]) => ({ customerId, count })),
+  };
+}
+
+/** Reward promised on a referral that has no coupon yet (null when nothing is owed). */
+function pendingReward(b) {
+  if (b.status === 'CANCELLED' || !(b.referralRewardCents > 0)) return null;
+  return {
+    couponId: null,
+    code: null,
+    valueCents: b.referralRewardCents,
+    status: 'PENDING',
+    waitingFor: b.status === 'COMPLETED' ? 'HOLD' : 'VISIT',
+    expiresAt: null,
   };
 }
 
@@ -65,6 +81,7 @@ async function updateSettings(businessId, body = {}, actorUserId = null) {
   if (body.discountCents !== undefined) data.referralDiscountCents = intIn(body.discountCents, 'discountCents', 0, 50000);
   if (body.rewardCents !== undefined) data.referralRewardCents = intIn(body.rewardCents, 'rewardCents', 0, 50000);
   if (body.rewardValidDays !== undefined) data.referralRewardValidDays = intIn(body.rewardValidDays, 'rewardValidDays', 1, 730);
+  if (body.holdDays !== undefined) data.referralHoldDays = intIn(body.holdDays, 'holdDays', 0, 60);
   if (body.minBookingCents !== undefined) data.referralMinBookingCents = intIn(body.minBookingCents, 'minBookingCents', 0, 1000000);
   await prisma.businessPricing.upsert({ where: { businessId }, create: { businessId, ...data }, update: data });
   await audit({ businessId, actorUserId, action: 'REFERRAL_SETTINGS_UPDATED', entityType: 'BusinessPricing', entityId: businessId, metadata: data });
@@ -84,7 +101,7 @@ async function listReferrals(businessId, { page = 1, limit = 25, flagged } = {})
       skip,
       take,
       select: {
-        id: true, createdAt: true, status: true, customerId: true, referredByCustomerId: true, referralDiscountCents: true,
+        id: true, createdAt: true, status: true, customerId: true, referredByCustomerId: true, referralDiscountCents: true, referralRewardCents: true,
         customer: { select: { id: true, firstName: true, lastName: true } },
       },
     }),
@@ -116,7 +133,9 @@ async function listReferrals(businessId, { page = 1, limit = 25, flagged } = {})
       referredCustomer: { id: b.customerId, name: fullName(b.customer) },
       referrer: { id: b.referredByCustomerId, name: fullName(ref), code: ref?.referralCode || null },
       discountCents: b.referralDiscountCents || 0,
-      reward: c ? { couponId: c.id, code: c.code, valueCents: c.value, status: rewardStatus(c), expiresAt: c.expiresAt } : null,
+      reward: c
+        ? { couponId: c.id, code: c.code, valueCents: c.value, status: rewardStatus(c), expiresAt: c.expiresAt }
+        : pendingReward(b),
       flags: (volume[b.referredByCustomerId] || 0) >= HIGH_VOLUME_THRESHOLD ? ['HIGH_VOLUME'] : [],
     };
   });
@@ -128,7 +147,7 @@ async function getStats(businessId) {
   const [bookings, coupons] = await Promise.all([
     prisma.booking.findMany({
       where: { businessId, referredByCustomerId: { not: null } },
-      select: { status: true, referredByCustomerId: true, referralDiscountCents: true },
+      select: { id: true, status: true, referredByCustomerId: true, referralDiscountCents: true, referralRewardCents: true },
       take: 10000,
     }),
     prisma.coupon.findMany({ where: { businessId, sourceBookingId: { not: null } }, take: 10000 }),
@@ -152,4 +171,21 @@ async function cancelReward(businessId, couponId, actorUserId = null) {
   return { id: coupon.id, status: 'CANCELLED' };
 }
 
-module.exports = { getSettings, updateSettings, listReferrals, getStats, cancelReward, summarise, rewardStatus, HIGH_VOLUME_THRESHOLD };
+/** Withdraws a reward that has been promised but not issued yet (e.g. suspected abuse). */
+async function forfeitPendingReward(businessId, bookingId, actorUserId = null) {
+  const booking = await prisma.booking.findFirst({
+    where: { id: bookingId, businessId, referredByCustomerId: { not: null } },
+    select: { id: true, referralRewardCents: true },
+  });
+  if (!booking) throw httpError(404, 'Referral not found');
+  const issued = await prisma.coupon.findFirst({ where: { businessId, sourceBookingId: bookingId }, select: { id: true } });
+  if (issued) throw httpError(409, 'The reward has already been issued; cancel the coupon instead');
+  if (!(booking.referralRewardCents > 0)) return { bookingId, status: 'NONE' };
+  await prisma.booking.update({ where: { id: bookingId }, data: { referralRewardCents: 0 } });
+  await audit({ businessId, actorUserId, action: 'REFERRAL_REWARD_FORFEITED', entityType: 'Booking', entityId: bookingId, metadata: { valueCents: booking.referralRewardCents } });
+  return { bookingId, status: 'FORFEITED' };
+}
+
+module.exports = {
+  forfeitPendingReward,
+  pendingReward, getSettings, updateSettings, listReferrals, getStats, cancelReward, summarise, rewardStatus, HIGH_VOLUME_THRESHOLD };

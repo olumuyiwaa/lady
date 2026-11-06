@@ -521,7 +521,7 @@ async function getReferral(businessId, customerId) {
   const settings = await getReferralSettings(businessId);
   const referred = await prisma.booking.findMany({
     where: { businessId, referredByCustomerId: customerId },
-    select: { customerId: true, status: true },
+    select: { id: true, customerId: true, status: true, referralRewardCents: true },
   });
   const friendsBooked = new Set(referred.map((r) => r.customerId)).size;
   const friendsCompleted = new Set(referred.filter((r) => r.status === 'COMPLETED').map((r) => r.customerId)).size;
@@ -531,6 +531,8 @@ async function getReferral(businessId, customerId) {
     orderBy: { createdAt: 'desc' },
     take: 20,
   });
+  const rewarded = new Set(coupons.map((c) => c.sourceBookingId).filter(Boolean));
+  const pending = referred.filter((r) => r.status !== 'CANCELLED' && r.referralRewardCents > 0 && !rewarded.has(r.id));
   const now = Date.now();
   const rewards = coupons.map((c) => {
     const used = c.maxRedemptions != null && (c.redeemedCount || 0) >= c.maxRedemptions;
@@ -550,6 +552,9 @@ async function getReferral(businessId, customerId) {
     getCents: settings.rewardCents,
     friendsBooked,
     friendsCompleted,
+    // Promised for friends whose first visit has not happened yet (or is in the hold period).
+    pendingCount: pending.length,
+    pendingCents: pending.reduce((a, r) => a + r.referralRewardCents, 0),
     // What they were actually granted (cancelled rewards do not count).
     earnedCents: coupons.filter((c) => c.isActive || (c.redeemedCount || 0) > 0).reduce((a, c) => a + (c.value || 0), 0),
     rewards,

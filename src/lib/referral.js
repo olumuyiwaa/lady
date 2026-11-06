@@ -20,6 +20,7 @@ const DEFAULTS = {
   rewardCents: REFERRAL_REWARD_CENTS,
   rewardValidDays: REFERRAL_REWARD_VALID_DAYS,
   minBookingCents: 0,
+  holdDays: 0,
 };
 
 /** Pure: BusinessPricing row (or null) -> settings. */
@@ -32,6 +33,7 @@ function resolveSettings(row) {
     rewardCents: num(row.referralRewardCents, DEFAULTS.rewardCents),
     rewardValidDays: num(row.referralRewardValidDays, DEFAULTS.rewardValidDays),
     minBookingCents: num(row.referralMinBookingCents, DEFAULTS.minBookingCents),
+    holdDays: num(row.referralHoldDays, DEFAULTS.holdDays),
   };
 }
 

@@ -235,8 +235,9 @@ describe('referral settings and self-referral checks', () => {
     const r = await referred();
     expect(r.referralDiscountCents).toBe(1000);
     expect(prisma.booking.create.mock.calls.at(-1)[0].data.referralDiscountCents).toBe(1000);
-    const coupon = prisma.coupon.create.mock.calls.at(-1)[0].data;
-    expect(coupon).toMatchObject({ value: 500, sourceBookingId: expect.anything() });
+    // The reward is promised now but issued when the visit is completed.
+    expect(prisma.booking.create.mock.calls.at(-1)[0].data.referralRewardCents).toBe(500);
+    expect(prisma.coupon.create).not.toHaveBeenCalled();
 
     prisma.customer.findFirst.mockReset().mockResolvedValueOnce(null).mockResolvedValueOnce(friend);
     prisma.businessPricing.findUnique.mockResolvedValueOnce({ referralMinBookingCents: 999999 });

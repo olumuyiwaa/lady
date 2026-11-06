@@ -686,7 +686,12 @@ async function submitBooking(businessId, payload) {
       data: buildBookingData({
         businessId, customerId: cust.id, serviceId, payload, q, start, end,
         priceCents: priceCents - discount,
-        extra: { referredByCustomerId: ref?.id || null, referralDiscountCents: ref ? discount : null },
+        extra: {
+          referredByCustomerId: ref?.id || null,
+          referralDiscountCents: ref ? discount : null,
+          // Promised now, paid as a coupon once this visit is completed.
+          referralRewardCents: ref ? refSettings.rewardCents : null,
+        },
       }),
     });
     return { booking: b, customer: cust, referrer: ref, referralDiscountCents: discount };
@@ -704,35 +709,8 @@ async function submitBooking(businessId, payload) {
 
   await maybeCreateRecurringSchedule(businessId, booking, customer, frequency);
 
-  // Reward the referrer with a single-use coupon, delivered only to them via
-  // SMS/email — there's no per-customer scoping column on Coupon, so a
-  // freshly generated, only-shared-with-them code is what keeps this
-  // effectively "theirs" rather than a code anyone could guess and use.
-  if (referrer && refSettings.rewardCents > 0) {
-    try {
-      const rewardCode = `REF-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
-      await prisma.coupon.create({
-        data: {
-          businessId,
-          code: rewardCode,
-          type: 'AMOUNT',
-          value: refSettings.rewardCents,
-          maxRedemptions: 1,
-          sourceBookingId: booking.id,
-          // Lets the referrer see this reward in their customer portal.
-          ownerCustomerId: referrer.id,
-          expiresAt: new Date(Date.now() + refSettings.rewardValidDays * 24 * 60 * 60 * 1000),
-        },
-      });
-      const notificationClient = require('../../lib/notificationClient');
-      const business = await prisma.business.findUnique({ where: { id: businessId } });
-      const rewardMsg = `${business.name}: thanks for the referral! Use code ${rewardCode} for ${formatMoney(refSettings.rewardCents, business.currency)} off your next booking.`;
-      if (referrer.phone) await notificationClient.sendSms({ to: referrer.phone, body: rewardMsg });
-      if (referrer.email) await notificationClient.sendEmail({ to: referrer.email, subject: `${business.name}: your referral reward`, text: rewardMsg, html: `<p>${rewardMsg}</p>` });
-    } catch (e) {
-      // non-fatal — the referred customer's discount already applied regardless
-    }
-  }
+  // The referrer's reward is issued when this visit is completed, not now:
+  // see modules/referrals/referralRewards.js.
 
   if (blockedReferral) {
     require('../../utils/audit')

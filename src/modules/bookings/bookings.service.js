@@ -437,6 +437,14 @@ async function completeBooking(businessId, bookingId, actorUserId, options = {})
     logger.error('Failed to compute cleaner earnings', { bookingId, error: e.message });
   }
 
+  // A referred customer's first visit is done: the referrer earns their reward
+  // (after the business's hold period, if any). Never blocks completion.
+  try {
+    await require('../referrals/referralRewards').issueRewardForBooking(businessId, bookingId);
+  } catch (e) {
+    logger.error('Failed to issue referral reward', { bookingId, error: e.message });
+  }
+
   return updated;
 }
 

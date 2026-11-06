@@ -3,6 +3,7 @@ const cron = require('node-cron');
 const logger = require('../config/logger');
 const { processOnce } = require('./recurringWorker');
 const { sweepUnpaidDeposits } = require('./depositSweeper');
+const { issueDueRewards } = require('../modules/referrals/referralRewards');
 
 const PORT = parseInt(process.env.RECURRING_DAEMON_PORT || '4001', 10);
 const CRON_EXPR = process.env.RECURRING_CRON || '*/5 * * * *'; // default every 5 minutes
@@ -23,6 +24,8 @@ async function runIteration() {
     status.processedSchedules += 1;
     // Same cadence: release slots held by deposits that were never paid.
     await sweepUnpaidDeposits();
+    // Referral rewards whose hold period has ended (and a retry for any that failed).
+    await issueDueRewards();
   } catch (e) {
     status.errors += 1;
     status.lastError = e.message;

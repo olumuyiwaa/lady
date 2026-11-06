@@ -23,7 +23,7 @@ test('modules load and every export is defined', () => {
 describe('settings', () => {
   test('defaults when no row, and when the lookup fails', async () => {
     prisma.businessPricing.findUnique.mockResolvedValueOnce(null);
-    expect(await lib.getReferralSettings('b')).toEqual({ enabled: true, discountCents: 2000, rewardCents: 2000, rewardValidDays: 90, minBookingCents: 0 });
+    expect(await lib.getReferralSettings('b')).toEqual({ enabled: true, discountCents: 2000, rewardCents: 2000, rewardValidDays: 90, minBookingCents: 0, holdDays: 0 });
     prisma.businessPricing.findUnique.mockRejectedValueOnce(new Error('column missing'));
     expect((await lib.getReferralSettings('b')).enabled).toBe(true);
   });

@@ -17,6 +17,7 @@ router.put(
     body('discountCents').optional().isInt({ min: 0, max: 50000 }),
     body('rewardCents').optional().isInt({ min: 0, max: 50000 }),
     body('rewardValidDays').optional().isInt({ min: 1, max: 730 }),
+    body('holdDays').optional().isInt({ min: 0, max: 60 }),
     body('minBookingCents').optional().isInt({ min: 0, max: 1000000 }),
   ],
   validate,
@@ -24,6 +25,7 @@ router.put(
 );
 router.get('/stats', controller.stats);
 router.post('/rewards/:couponId/cancel', controller.cancelReward);
+router.post('/:bookingId/forfeit', controller.forfeit);
 router.get('/', controller.list);
 
 module.exports = router;

@@ -18,6 +18,7 @@ jest.mock('../src/modules/notifications/notifications.service', () => ({
   requestReview: jest.fn(), sendCustomerPaymentLink: jest.fn(), notifyBookingRescheduled: jest.fn(),
 }));
 jest.mock('../src/modules/payroll/payroll.service', () => ({ computeEarningsForBooking: jest.fn() }));
+jest.mock('../src/modules/referrals/referralRewards', () => ({ issueRewardForBooking: jest.fn().mockResolvedValue({ issued: false }) }));
 jest.mock('../src/lib/assignmentConflicts', () => ({ assertCleanerFree: jest.fn() }));
 jest.mock('../src/lib/stripeClient', () => ({
   createBookingCheckoutSession: jest.fn(),
@@ -154,6 +155,17 @@ describe('one completion implementation', () => {
     expect(notifications.sendCustomerPaymentLink).toHaveBeenCalledWith('biz', expect.anything(), expect.anything(), 'https://pay/cs_1');
     expect(order).toEqual(['stamp', 'payroll']);
     expect(prisma.bookingAssignment.updateMany).toHaveBeenCalledWith({ where: { bookingId: 'bk1', checkedInAt: { not: null }, checkedOutAt: null }, data: { checkedOutAt: expect.any(Date) } });
+  });
+
+  test('completion asks for the referral reward, and a failure there never blocks it', async () => {
+    const rewards = require('../src/modules/referrals/referralRewards');
+    prisma.booking.findFirst.mockResolvedValue(bk({ status: 'ASSIGNED', paymentStatus: 'PAID' }));
+    prisma.booking.findUnique.mockResolvedValue(bk({ paymentStatus: 'PAID' }));
+    await bookings.completeBooking('biz', 'bk1', 'u');
+    expect(rewards.issueRewardForBooking).toHaveBeenCalledWith('biz', 'bk1');
+
+    rewards.issueRewardForBooking.mockRejectedValueOnce(new Error('boom'));
+    await expect(bookings.completeBooking('biz', 'bk1', 'u')).resolves.toBeDefined();
   });
 
   test('completing twice is idempotent: no second review request or payment link', async () => {
