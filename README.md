@@ -39,7 +39,7 @@ secret in `STRIPE_WEBHOOK_SECRETS`.
 cp .env.example .env        # fill DATABASE_URL, JWT secrets, STRIPE_*, OWNER_*
 npm ci
 npx prisma generate
-npm run migrate             # deploy existing migrations (production / CI)
+npm run migrate             # deploy existing migrations (production / CI); run after every pull
 # npm run migrate:dev       # create a new migration (local dev schema changes)
 OWNER_EMAIL=owner@todcleaning.nl OWNER_PASSWORD='a-long-password' npm run seed
 npm run dev
@@ -50,10 +50,27 @@ Workers (run alongside the API in production):
 | Script | Command | What it does |
 |--------|---------|--------------|
 | `notification-worker` | `npm run notification-worker` | Drains the Bull queue — sends email & SMS jobs |
-| `recurring-daemon` | `npm run recurring-daemon` | Cron (default every 5 min) — generates upcoming recurring visits and sweeps unpaid deposits |
+| `recurring-daemon` | `npm run recurring-daemon` | Cron (default every 5 min) — generates upcoming recurring visits, sweeps unpaid deposits and issues referral rewards once their hold period has passed |
 | `reminder-daemon` | `npm run reminder-daemon` | Cron (default hourly) — sends booking reminder messages |
 | `sweep-deposits` | `npm run sweep-deposits` | One-shot deposit sweeper (also run inside the recurring daemon) |
 | `precompute-slots` | `npm run precompute-slots` | Warms the Redis slot cache for the booking widget; run once daily |
+
+## Features beyond booking
+
+| Area | What it does | Where |
+|---|---|---|
+| Dispatch scoring | Ranks cleaners per booking (proximity, rating, history with the customer, workload, customer's preferred cleaner) and explains why | `lib/matchScore.js` |
+| Travel fee | Distance-based fee added to a quote | `lib/travelFee.js` |
+| Live map | Where cleaners are and which jobs are running | `modules/dispatch/dispatch.live.js`, `GET /dispatch/live` |
+| Day planner | Proposes which cleaner takes each unassigned job with the least extra driving; nothing changes until applied. Customer times never move | `lib/dayPlanner.js`, `modules/dispatch/dispatch.plan.js`, `GET /dispatch/plan`, `POST /dispatch/plan/apply` (needs the `autoDispatch` plan feature) |
+| Complaints | Complaint tickets with SLA timers | `lib/ticketSla.js`, `modules/supportTickets/complaints.service.js` |
+| B2B accounts | Company customers with several locations, payment terms and a monthly statement (CSV). The statement is not a legal invoice | `lib/b2bAccount.js`, `modules/b2b` |
+| Referrals | Admin-managed settings, abuse checks, reward promised at booking and issued when the booking completes (after a configurable hold). One reward per booking | `lib/referral.js`, `modules/referrals` |
+| Insights | Revenue, demand by weekday/hour, repeat rate, cancellations, per-cleaner rating and punctuality, plus plain-language findings | `lib/insights.js`, `GET /reports/insights?from=&to=` (default last 30 days, max range enforced) |
+
+Known limits: bookings created by admins never earn referral rewards; a B2B
+company has one portal login; the day planner estimates driving from straight-line
+distance when addresses lack coordinates.
 
 ## Tests
 
