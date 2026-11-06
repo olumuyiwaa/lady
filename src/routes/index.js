@@ -23,6 +23,7 @@ router.use('/services', require('../modules/services/services.routes'));
 router.use('/cleaner/bookings', require('../modules/bookings/cleanerBookings.routes'));
 // Admin bookings
 router.use('/bookings', require('../modules/bookings/bookings.routes'));
+router.use('/referrals', require('../modules/referrals/referrals.routes'));
 router.use('/dispatch', require('../modules/dispatch/dispatch.routes'));
 router.use('/checklists', require('../modules/checklists/checklists.routes'));
 router.use('/checklist-templates', require('../modules/checklistTemplates/checklistTemplates.routes'));

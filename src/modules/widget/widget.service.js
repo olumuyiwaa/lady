@@ -649,21 +649,35 @@ async function submitBooking(businessId, payload) {
   // discounts aren't designed to stack, to keep the pricing math and the
   // reward-issuing logic below from getting tangled with coupon redemption
   // limits).
-  // Amounts live in lib/referral.js ("Give €20, Get €20").
-  const { REFERRAL_DISCOUNT_CENTS, REFERRAL_REWARD_CENTS, REFERRAL_REWARD_VALID_DAYS } = require('../../lib/referral');
+  // Amounts are per business (BusinessPricing, see lib/referral.js). Read
+  // BEFORE the lock: a failed query inside a transaction would abort it.
+  const referralLib = require('../../lib/referral');
+  const refSettings = await referralLib.getReferralSettings(businessId);
+  let blockedReferral = null; // { referrerId, reason } for the audit trail
 
   const { booking, customer, referrer, referralDiscountCents } = await withBusinessLock(businessId, async (tx) => {
     await assertCapacity(businessId, start, end, q);
 
     const existingCustomer = await tx.customer.findFirst({ where: { businessId, phone } });
     let ref = null;
-    if (referralCode && !existingCustomer) {
+    if (refSettings.enabled && referralCode && !existingCustomer) {
       ref = await tx.customer.findFirst({ where: { businessId, referralCode: referralCode.toUpperCase() } });
-      // A customer cannot refer themselves under a second phone number, or
-      // reuse their own e-mail address to farm the discount.
-      if (ref && (ref.phone === phone || (ref.email && email && ref.email.toLowerCase() === String(email).toLowerCase()))) ref = null;
+      if (ref) {
+        // A customer cannot refer themselves: same phone, same e-mail (also
+        // +tag / Gmail dot variants) or the same service address as the referrer.
+        const [saved, past] = await Promise.all([
+          tx.customerAddress.findMany({ where: { customerId: ref.id }, select: { line1: true, postalCode: true }, take: 20 }),
+          tx.booking.findMany({ where: { businessId, customerId: ref.id }, select: { addressLine1: true, postalCode: true }, orderBy: { createdAt: 'desc' }, take: 20 }),
+        ]);
+        const reason = referralLib.detectSelfReferral(ref, [...saved, ...past], { phone, email, addressLine1, postalCode });
+        if (reason) {
+          blockedReferral = { referrerId: ref.id, reason };
+          ref = null;
+        }
+      }
     }
-    const discount = ref ? Math.min(REFERRAL_DISCOUNT_CENTS, priceCents) : 0;
+    const eligible = ref && priceCents >= refSettings.minBookingCents;
+    const discount = eligible ? Math.min(refSettings.discountCents, priceCents) : 0;
 
     const cust = await upsertGuestCustomer(tx, businessId, { firstName, lastName, email, phone });
     await assertCustomerNotSpamming(tx, cust.id);
@@ -672,7 +686,7 @@ async function submitBooking(businessId, payload) {
       data: buildBookingData({
         businessId, customerId: cust.id, serviceId, payload, q, start, end,
         priceCents: priceCents - discount,
-        extra: { referredByCustomerId: ref?.id || null },
+        extra: { referredByCustomerId: ref?.id || null, referralDiscountCents: ref ? discount : null },
       }),
     });
     return { booking: b, customer: cust, referrer: ref, referralDiscountCents: discount };
@@ -694,7 +708,7 @@ async function submitBooking(businessId, payload) {
   // SMS/email — there's no per-customer scoping column on Coupon, so a
   // freshly generated, only-shared-with-them code is what keeps this
   // effectively "theirs" rather than a code anyone could guess and use.
-  if (referrer) {
+  if (referrer && refSettings.rewardCents > 0) {
     try {
       const rewardCode = `REF-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
       await prisma.coupon.create({
@@ -702,21 +716,28 @@ async function submitBooking(businessId, payload) {
           businessId,
           code: rewardCode,
           type: 'AMOUNT',
-          value: REFERRAL_REWARD_CENTS,
+          value: refSettings.rewardCents,
           maxRedemptions: 1,
+          sourceBookingId: booking.id,
           // Lets the referrer see this reward in their customer portal.
           ownerCustomerId: referrer.id,
-          expiresAt: new Date(Date.now() + REFERRAL_REWARD_VALID_DAYS * 24 * 60 * 60 * 1000),
+          expiresAt: new Date(Date.now() + refSettings.rewardValidDays * 24 * 60 * 60 * 1000),
         },
       });
       const notificationClient = require('../../lib/notificationClient');
       const business = await prisma.business.findUnique({ where: { id: businessId } });
-      const rewardMsg = `${business.name}: thanks for the referral! Use code ${rewardCode} for ${formatMoney(REFERRAL_REWARD_CENTS, business.currency)} off your next booking.`;
+      const rewardMsg = `${business.name}: thanks for the referral! Use code ${rewardCode} for ${formatMoney(refSettings.rewardCents, business.currency)} off your next booking.`;
       if (referrer.phone) await notificationClient.sendSms({ to: referrer.phone, body: rewardMsg });
       if (referrer.email) await notificationClient.sendEmail({ to: referrer.email, subject: `${business.name}: your referral reward`, text: rewardMsg, html: `<p>${rewardMsg}</p>` });
     } catch (e) {
       // non-fatal — the referred customer's discount already applied regardless
     }
+  }
+
+  if (blockedReferral) {
+    require('../../utils/audit')
+      .audit({ businessId, action: 'REFERRAL_BLOCKED', entityType: 'Booking', entityId: booking.id, metadata: blockedReferral })
+      .catch(() => {});
   }
 
   let deposit = null;

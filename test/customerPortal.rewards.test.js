@@ -15,7 +15,7 @@ const cleanerRow = (id, first, status = 'ACTIVE') => ({ cleaner: { id, status, u
 beforeEach(() => jest.resetAllMocks());
 
 describe('getReferral', () => {
-  test('reports the €20/€20 offer, friends who booked and reward coupons', async () => {
+  test('reports the offer, friends who booked and every reward granted', async () => {
     prisma.customer.findFirst.mockResolvedValue({ referralCode: 'ABC234' });
     prisma.booking.findMany.mockResolvedValue([
       { customerId: 'f1', status: 'COMPLETED' },
@@ -30,7 +30,7 @@ describe('getReferral', () => {
       { code: 'REF-3', value: 2000, maxRedemptions: 1, redeemedCount: 0, expiresAt: past, isActive: true },
     ]);
     const r = await service.getReferral('biz1', 'cust1');
-    expect(r).toMatchObject({ code: 'ABC234', giveCents: 2000, getCents: 2000, friendsBooked: 2, friendsCompleted: 1, earnedCents: 4000 });
+    expect(r).toMatchObject({ code: 'ABC234', giveCents: 2000, getCents: 2000, friendsBooked: 2, friendsCompleted: 1, earnedCents: 6000, enabled: true });
     expect(r.rewards.map((x) => x.status)).toEqual(['AVAILABLE', 'USED', 'EXPIRED']);
     expect(prisma.booking.findMany.mock.calls[0][0].where).toEqual({ businessId: 'biz1', referredByCustomerId: 'cust1' });
     expect(prisma.coupon.findMany.mock.calls[0][0].where).toEqual({ businessId: 'biz1', ownerCustomerId: 'cust1' });

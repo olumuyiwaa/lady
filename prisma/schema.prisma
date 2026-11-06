@@ -337,6 +337,14 @@ model BusinessPricing {
   travelFreeKm       Int?
   travelFeePerKmCents Int?
   travelFeeMaxCents  Int?
+
+  // Referral programme ("give X, get Y"). Defaults reproduce the original
+  // fixed EUR 20 / EUR 20 / 90 days behaviour. See lib/referral.js.
+  referralEnabled         Boolean @default(true)
+  referralDiscountCents   Int     @default(2000)
+  referralRewardCents     Int     @default(2000)
+  referralRewardValidDays Int     @default(90)
+  referralMinBookingCents Int     @default(0)
   // perSqftCents is unit-agnostic rate math ("per unit") despite the name —
   // this just controls what unit the frontend collects from the customer
   // and labels the quote with. Default SQM since most tenants are NL-based;
@@ -381,12 +389,15 @@ model Coupon {
   // Set on referral reward coupons so the referrer can see them in the
   // customer portal. Null for ordinary promotional coupons.
   ownerCustomerId    String?
+  // For referral rewards: the referred booking that earned this coupon.
+  sourceBookingId    String?
   bookings           Booking[]
   createdAt          DateTime  @default(now())
 
   @@unique([businessId, code])
   @@index([businessId])
   @@index([ownerCustomerId])
+  @@index([sourceBookingId])
 }
 
 // A stored-value gift card issued by a business, optionally purchased by
@@ -1051,6 +1062,8 @@ model Booking {
   // quotedPriceCents, purely so "referrals converted" is reportable later
   // without re-deriving it from notification logs.
   referredByCustomerId    String?
+  // The discount the referred customer received (already inside quotedPriceCents).
+  referralDiscountCents   Int?
   // Bookkeeping only — Tod Cleaning Services does not process this payment
   paymentStatus           PaymentStatus      @default(UNPAID)
   stripeCheckoutSessionId String?

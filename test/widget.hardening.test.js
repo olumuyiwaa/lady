@@ -6,7 +6,10 @@ jest.mock('../src/config/database.js', () => {
     businessHours: { findMany: jest.fn() },
     businessPricing: { findUnique: jest.fn().mockResolvedValue(null) },
     bookingQuestion: { findMany: jest.fn().mockResolvedValue([]) },
-    booking: { count: jest.fn().mockResolvedValue(0), create: jest.fn(), update: jest.fn() },
+    booking: { count: jest.fn().mockResolvedValue(0), create: jest.fn(), update: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
+    customerAddress: { findMany: jest.fn().mockResolvedValue([]) },
+    businessPricing: { findUnique: jest.fn().mockResolvedValue(null) },
+    coupon: { create: jest.fn().mockResolvedValue({}) },
     customer: { findFirst: jest.fn().mockResolvedValue(null), upsert: jest.fn(), findUnique: jest.fn() },
     coupon: { findFirst: jest.fn(), updateMany: jest.fn(), update: jest.fn(), create: jest.fn() },
     $executeRaw: jest.fn().mockResolvedValue(1),
@@ -191,6 +194,53 @@ describe('abuse controls', () => {
     const r = await widget.submitBooking('biz', payload({ referralCode: 'abc123' }));
     expect(r.referralDiscountCents).toBe(2000);
     expect(prisma.booking.create.mock.calls[0][0].data.quotedPriceCents).toBe(6000);
+  });
+});
+
+describe('referral settings and self-referral checks', () => {
+  const friend = { id: 'ref', phone: '+31600000000', email: 'friend@x.nl' };
+  const referred = (code = 'abc123') => widget.submitBooking('biz', payload({ referralCode: code }));
+  beforeEach(() => {
+    prisma.customer.findFirst.mockReset().mockResolvedValueOnce(null).mockResolvedValueOnce(friend);
+  });
+
+  test('the same phone in another format is caught', async () => {
+    prisma.customer.findFirst.mockReset().mockResolvedValueOnce(null).mockResolvedValueOnce({ ...friend, phone: '0612345678' });
+    const r = await widget.submitBooking('biz', payload({ referralCode: 'abc123', phone: '+31 6 12345678' }));
+    expect(r.referralDiscountCents).toBe(0);
+  });
+
+  test('a Gmail dot/plus variant of the referrer e-mail is caught', async () => {
+    prisma.customer.findFirst.mockReset().mockResolvedValueOnce(null).mockResolvedValueOnce({ ...friend, email: 'anna.b@gmail.com' });
+    const r = await widget.submitBooking('biz', payload({ referralCode: 'abc123', email: 'annab+promo@gmail.com' }));
+    expect(r.referralDiscountCents).toBe(0);
+  });
+
+  test("booking at the referrer's own address is caught and audited", async () => {
+    const p = payload({ referralCode: 'abc123' });
+    prisma.booking.findMany.mockResolvedValueOnce([{ addressLine1: p.addressLine1, postalCode: p.postalCode }]);
+    const r = await widget.submitBooking('biz', p);
+    expect(r.referralDiscountCents).toBe(0);
+    expect(prisma.booking.create.mock.calls.at(-1)[0].data.referredByCustomerId).toBeNull();
+  });
+
+  test('a business can switch referrals off', async () => {
+    prisma.businessPricing.findUnique.mockResolvedValueOnce({ referralEnabled: false });
+    const r = await referred();
+    expect(r.referralDiscountCents).toBe(0);
+  });
+
+  test('uses the business amounts and a minimum booking value', async () => {
+    prisma.businessPricing.findUnique.mockResolvedValueOnce({ referralEnabled: true, referralDiscountCents: 1000, referralRewardCents: 500, referralRewardValidDays: 30, referralMinBookingCents: 0 });
+    const r = await referred();
+    expect(r.referralDiscountCents).toBe(1000);
+    expect(prisma.booking.create.mock.calls.at(-1)[0].data.referralDiscountCents).toBe(1000);
+    const coupon = prisma.coupon.create.mock.calls.at(-1)[0].data;
+    expect(coupon).toMatchObject({ value: 500, sourceBookingId: expect.anything() });
+
+    prisma.customer.findFirst.mockReset().mockResolvedValueOnce(null).mockResolvedValueOnce(friend);
+    prisma.businessPricing.findUnique.mockResolvedValueOnce({ referralMinBookingCents: 999999 });
+    expect((await referred()).referralDiscountCents).toBe(0);
   });
 });
 

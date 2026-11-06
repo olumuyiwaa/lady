@@ -11,7 +11,7 @@ const logger = require('../../config/logger');
 const { createAncillaryCheckoutSession } = require('../../lib/stripeClient');
 const { findCustomerByPhone } = require('../../lib/phone');
 const { buildTimeline } = require('../../lib/bookingTimeline');
-const { REFERRAL_DISCOUNT_CENTS, REFERRAL_REWARD_CENTS } = require('../../lib/referral');
+const { getReferralSettings } = require('../../lib/referral');
 
 const OTP_TTL_MS = 10 * 60 * 1000;
 const OTP_MAX_REQUESTS_PER_WINDOW = 3;
@@ -518,6 +518,7 @@ async function getReferral(businessId, customerId) {
   const code =
     customer.referralCode || (await require('../customers/customers.service').ensureReferralCode(customerId));
 
+  const settings = await getReferralSettings(businessId);
   const referred = await prisma.booking.findMany({
     where: { businessId, referredByCustomerId: customerId },
     select: { customerId: true, status: true },
@@ -543,12 +544,14 @@ async function getReferral(businessId, customerId) {
   });
 
   return {
+    enabled: settings.enabled,
     code,
-    giveCents: REFERRAL_DISCOUNT_CENTS,
-    getCents: REFERRAL_REWARD_CENTS,
+    giveCents: settings.discountCents,
+    getCents: settings.rewardCents,
     friendsBooked,
     friendsCompleted,
-    earnedCents: friendsBooked * REFERRAL_REWARD_CENTS,
+    // What they were actually granted (cancelled rewards do not count).
+    earnedCents: coupons.filter((c) => c.isActive || (c.redeemedCount || 0) > 0).reduce((a, c) => a + (c.value || 0), 0),
     rewards,
   };
 }
