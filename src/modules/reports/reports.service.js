@@ -94,6 +94,69 @@ async function generateKPIs(businessId, { from, to } = {}) {
   };
 }
 
+/** Insights for a date range: demand, services, customers, cleaners and what stands out. */
+async function getInsights(businessId, { from, to } = {}) {
+  const end = to ? new Date(to) : new Date();
+  const start = from ? new Date(from) : new Date(end.getTime() - 30 * 24 * 3600 * 1000);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) {
+    const err = new Error('Choose a valid date range');
+    err.status = 422;
+    throw err;
+  }
+  if (end - start > 366 * 24 * 3600 * 1000) {
+    const err = new Error('Date range is too long (max one year)');
+    err.status = 422;
+    throw err;
+  }
+  const span = end - start;
+  const prevStart = new Date(start.getTime() - span);
+  const range = (a, b) => ({ gte: a, lt: b });
+
+  const [business, rows, cancelledCount, previous, previousCancelledCount] = await Promise.all([
+    prisma.business.findUnique({ where: { id: businessId }, select: { timezone: true } }),
+    prisma.booking.findMany({
+      where: { businessId, status: { not: 'CANCELLED' }, scheduledStart: range(start, end) },
+      select: {
+        id: true, status: true, customerId: true, scheduledStart: true, scheduledEnd: true, quotedPriceCents: true, recurringScheduleId: true,
+        service: { select: { name: true } },
+        assignments: { select: { cleanerId: true, checkedInAt: true } },
+      },
+      take: 20000,
+    }),
+    prisma.booking.count({ where: { businessId, status: 'CANCELLED', scheduledStart: range(start, end) } }),
+    prisma.booking.findMany({ where: { businessId, status: { not: 'CANCELLED' }, scheduledStart: range(prevStart, start) }, select: { quotedPriceCents: true }, take: 20000 }),
+    prisma.booking.count({ where: { businessId, status: 'CANCELLED', scheduledStart: range(prevStart, start) } }),
+  ]);
+
+  const customerIds = [...new Set(rows.map((b) => b.customerId))];
+  const cleanerIds = [...new Set(rows.flatMap((b) => b.assignments.map((a) => a.cleanerId)))];
+  const [firsts, reviews, cleaners] = await Promise.all([
+    customerIds.length
+      ? prisma.booking.groupBy({ by: ['customerId'], where: { businessId, customerId: { in: customerIds }, status: { not: 'CANCELLED' } }, _min: { scheduledStart: true } })
+      : [],
+    cleanerIds.length
+      ? prisma.review.findMany({ where: { businessId, cleanerId: { in: cleanerIds }, createdAt: range(start, end) }, select: { cleanerId: true, rating: true }, take: 20000 })
+      : [],
+    cleanerIds.length
+      ? prisma.cleanerProfile.findMany({ where: { businessId, id: { in: cleanerIds } }, select: { id: true, user: { select: { firstName: true, lastName: true } } } })
+      : [],
+  ]);
+
+  const { buildInsights } = require('../../lib/insights');
+  const result = buildInsights({
+    bookings: rows.map((b) => ({ ...b, serviceName: b.service?.name })),
+    cancelledCount,
+    previous,
+    previousCancelledCount,
+    reviews,
+    firstSeen: Object.fromEntries(firsts.map((f) => [f.customerId, f._min.scheduledStart])),
+    cleanerNames: Object.fromEntries(cleaners.map((c) => [c.id, [c.user?.firstName, c.user?.lastName].filter(Boolean).join(' ')])),
+    from: start,
+    timeZone: business?.timezone || 'Europe/Amsterdam',
+  });
+  return { from: start, to: end, ...result };
+}
+
 async function revenueByDay(businessId, { from, to } = {}) {
   const where = { businessId, status: 'COMPLETED' };
   if (from || to) {
@@ -276,6 +339,7 @@ async function orgSummary(parentBusinessId, { from, to } = {}) {
 }
 
 module.exports = {
+  getInsights,
   orgSummary,
   generateSummary,
   generateKPIs,

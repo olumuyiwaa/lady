@@ -18,6 +18,22 @@ async function live(req, res, next) {
   }
 }
 
+async function plan(req, res, next) {
+  try {
+    return success(res, 200, await require('./dispatch.plan').planForDate(req.businessId, req.query.date));
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function applyPlan(req, res, next) {
+  try {
+    return success(res, 200, await require('./dispatch.plan').applyPlan(req.businessId, req.body.assignments, req.user?.id));
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function createAssignment(req, res, next) {
   try {
     const a = await service.createAssignment(req.businessId, req.body.bookingId, req.body.cleanerId, req.user.id, {
@@ -80,4 +96,6 @@ async function getCleanerDayRoute(req, res, next) {
 }
 
 module.exports = {
-  live, list, createAssignment, getAssignment, removeAssignment, suggestCleaners, getCleanerDayRoute };
+  live,
+  plan,
+  applyPlan, list, createAssignment, getAssignment, removeAssignment, suggestCleaners, getCleanerDayRoute };

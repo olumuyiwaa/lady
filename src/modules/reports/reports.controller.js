@@ -92,4 +92,12 @@ async function cleanerPerfExport(req, res, next) {
   }
 }
 
-module.exports = { list, kpis, revenue, cleanerPerf, auditTrail, orgSummary, revenueExport, cleanerPerfExport };
+async function insights(req, res, next) {
+  try {
+    return success(res, 200, await service.getInsights(req.businessId, { from: req.query.from, to: req.query.to }));
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { insights, list, kpis, revenue, cleanerPerf, auditTrail, orgSummary, revenueExport, cleanerPerfExport };

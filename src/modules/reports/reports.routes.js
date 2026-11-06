@@ -9,6 +9,7 @@ const router = express.Router();
 router.use(authenticate, scopeToBusiness);
 
 router.get('/', requireRole('BUSINESS_OWNER', 'BUSINESS_MANAGER'), controller.list);
+router.get('/insights', requireRole('BUSINESS_OWNER', 'BUSINESS_MANAGER'), controller.insights);
 router.get('/kpis', requireRole('BUSINESS_OWNER', 'BUSINESS_MANAGER'), controller.kpis);
 router.get('/revenue', requireRole('BUSINESS_OWNER', 'BUSINESS_MANAGER'), controller.revenue);
 router.get('/revenue/export', requireRole('BUSINESS_OWNER', 'BUSINESS_MANAGER'), requirePlanFeature('reportExports', 'Report exports'), controller.revenueExport);
