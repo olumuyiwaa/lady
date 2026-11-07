@@ -13,6 +13,7 @@
  */
 const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcryptjs');
+const { locationKey } = require('../src/lib/b2bAccount');
 
 const prisma = new PrismaClient();
 
@@ -884,6 +885,131 @@ async function main() {
         }
     }
 
+    // ─── Language + WhatsApp consent on the demo customers ────────────
+    const langPlan = [
+        { phone: '+31620000001', language: 'nl', whatsapp: true },
+        { phone: '+31620000002', language: 'en', whatsapp: false },
+        { phone: '+31620000003', language: 'nl', whatsapp: false },
+        { phone: '+31620000005', language: 'nl', whatsapp: true },
+    ];
+    for (const l of langPlan) {
+        await prisma.customer.updateMany({
+            where: { businessId: bid, phone: l.phone, language: null },
+            data: { language: l.language, ...(l.whatsapp ? { whatsappOptInAt: daysAgo(20) } : {}) },
+        });
+    }
+
+    // ─── Cleaner leave: one approved, one waiting for a decision ──────
+    if ((await prisma.cleanerLeave.count({ where: { businessId: bid } })) === 0) {
+        await prisma.cleanerLeave.createMany({
+            data: [
+                { businessId: bid, cleanerId: cleaners[0].id, type: 'VACATION', status: 'APPROVED', startsAt: daysFromNow(14, 0), endsAt: daysFromNow(19, 0), reason: 'Vakantie', decidedAt: new Date() },
+                { businessId: bid, cleanerId: cleaners[1].id, type: 'PERSONAL', status: 'PENDING', startsAt: daysFromNow(8, 0), endsAt: daysFromNow(9, 0), reason: 'Verhuizing' },
+            ],
+        });
+        console.log('✓ Cleaner leave (1 approved, 1 pending)');
+    }
+
+    // ─── Business (B2B) accounts, branches, a month+ of visits, team ──
+    const companyDefs = [
+        {
+            companyName: 'Acme Offices BV', firstName: 'Marieke', lastName: 'Visser', email: 'facilities@acme-demo.nl', phone: '+31620000101',
+            kvk: '12345678', vat: 'NL123456789B01', terms: 30, language: 'nl',
+            branches: [
+                { line1: 'Damrak 70', postal: '1012 LM', city: 'Amsterdam' },
+                { line1: 'Herengracht 450', postal: '1017 CA', city: 'Amsterdam' },
+                { line1: 'Stationsplein 12', postal: '1012 AB', city: 'Amsterdam' },
+            ],
+            members: [
+                { firstName: 'Marieke', lastName: 'Visser', email: 'marieke@acme-demo.nl', role: 'ADMIN', branch: [] },
+                { firstName: 'Daan', lastName: 'Koster', email: 'daan@acme-demo.nl', role: 'BRANCH_MANAGER', branch: [0] },
+                { firstName: 'Noor', lastName: 'Bos', email: 'noor@acme-demo.nl', role: 'BRANCH_MANAGER', branch: [1, 2] },
+            ],
+            // per branch: how often the cleaner is late / how many items stay undone / rating / complaints
+            quality: [{ late: 0.1, undone: 0, rating: 5 }, { late: 0.5, undone: 1, rating: 3 }, { late: 0.2, undone: 0, rating: 4 }],
+        },
+        {
+            companyName: 'Bright Dental Clinics', firstName: 'Sam', lastName: 'de Wit', email: 'office@brightdental-demo.nl', phone: '+31620000102',
+            kvk: '87654321', vat: 'NL987654321B01', terms: 14, language: 'en',
+            branches: [
+                { line1: 'Overtoom 120', postal: '1054 HG', city: 'Amsterdam' },
+                { line1: 'Rembrandtweg 8', postal: '1181 AA', city: 'Amstelveen' },
+            ],
+            members: [{ firstName: 'Sam', lastName: 'de Wit', email: 'sam@brightdental-demo.nl', role: 'ADMIN', branch: [] }],
+            quality: [{ late: 0, undone: 0, rating: 5 }, { late: 0.3, undone: 2, rating: 4 }],
+        },
+    ];
+
+    for (const def of companyDefs) {
+        let company = await prisma.customer.findFirst({ where: { businessId: bid, phone: def.phone } });
+        if (!company) {
+            company = await prisma.customer.create({
+                data: {
+                    businessId: bid, firstName: def.firstName, lastName: def.lastName, email: def.email, phone: def.phone,
+                    companyName: def.companyName, kvkNumber: def.kvk, vatNumber: def.vat, billingEmail: def.email,
+                    paymentTermsDays: def.terms, language: def.language, notes: 'Demo zakelijk account',
+                    referralCode: `REF-${def.companyName.split(' ')[0].toUpperCase()}`,
+                },
+            });
+        }
+
+        // Visits: every 3 days over the last ~45 days, rotating over the branches.
+        if ((await prisma.booking.count({ where: { businessId: bid, customerId: company.id } })) === 0) {
+            let n = 0;
+            for (let day = 45; day >= 3; day -= 3) {
+                const bi = n % def.branches.length;
+                const branch = def.branches[bi];
+                const q = def.quality[bi];
+                const cleaner = cleaners[n % cleaners.length];
+                const start = daysAgo(day, 7);
+                const end = daysAgo(day, 9);
+                const late = ((n * 37) % 100) / 100 < q.late; // deterministic
+                const checkIn = new Date(start.getTime() + (late ? 25 : 2) * 60000);
+                const items = ['Kantoor', 'Sanitair', 'Keuken', 'Vuilnis'].map((label, i) => ({ label, done: i >= q.undone }));
+                const booking = await prisma.booking.create({
+                    data: {
+                        businessId: bid, customerId: company.id, serviceId: svcRegular.id,
+                        addressLine1: branch.line1, city: branch.city, state: 'NH', postalCode: branch.postal,
+                        scheduledStart: start, scheduledEnd: end, status: 'COMPLETED',
+                        quotedPriceCents: 6050, paymentStatus: 'UNPAID', termsAcceptedAt: daysAgo(day + 2),
+                        homeDetails: { frequency: 'WEEKLY' },
+                        assignments: { create: { cleanerId: cleaner.id, isTeamLead: true, checkedInAt: checkIn, checkedOutAt: end } },
+                        checklist: { create: { items, completedAt: end } },
+                        ...(n % 2 === 0
+                            ? { review: { create: { businessId: bid, customerId: company.id, cleanerId: cleaner.id, rating: q.rating, comment: null } } }
+                            : {}),
+                    },
+                });
+                // A complaint on the weaker branches now and then.
+                if (q.rating <= 3 && n % 4 === 1) {
+                    await prisma.supportTicket.create({
+                        data: {
+                            businessId: bid, customerId: company.id, bookingId: booking.id, cleanerId: cleaner.id,
+                            subject: `Klacht over bezoek ${branch.line1}`, description: 'Sanitair was niet schoongemaakt.',
+                            status: 'OPEN', priority: 'HIGH', category: 'QUALITY', kind: 'COMPLAINT',
+                            contactName: `${def.firstName} ${def.lastName}`, contactEmail: def.email,
+                        },
+                    });
+                }
+                n += 1;
+            }
+            console.log(`✓ ${def.companyName}: ${def.branches.length} branches, ${n} visits`);
+        }
+
+        // Team members (login by one-time code to their own email).
+        for (const m of def.members) {
+            const exists = await prisma.companyMember.findFirst({ where: { businessId: bid, email: m.email } });
+            if (exists) continue;
+            await prisma.companyMember.create({
+                data: {
+                    businessId: bid, customerId: company.id, firstName: m.firstName, lastName: m.lastName, email: m.email, role: m.role,
+                    locationKeys: m.branch.map((i) => locationKey({ addressLine1: def.branches[i].line1, postalCode: def.branches[i].postal, city: def.branches[i].city })),
+                },
+            });
+        }
+    }
+    console.log('✓ Business accounts with team members');
+
     console.log('\n══════════════════════════════════════════════════');
     console.log('Demo seed complete. Sign in and explore:');
     console.log('');
@@ -897,6 +1023,10 @@ async function main() {
     console.log('  Invoices, Payroll/earnings, Transactions');
     console.log('  Inventory, Compliance, Reviews, Waitlist');
     console.log('  Coupons/gift cards, Messages, Support tickets');
+    console.log('  Leave, People > Business accounts (Acme Offices BV, Bright Dental Clinics)');
+    console.log('');
+    console.log('Company logins in the customer portal (one-time code, per member email):');
+    console.log('  marieke@acme-demo.nl (admin), daan@acme-demo.nl (1 branch), noor@acme-demo.nl (2 branches), sam@brightdental-demo.nl (admin)');
     console.log('══════════════════════════════════════════════════\n');
 }
 
