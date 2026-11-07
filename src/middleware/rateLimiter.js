@@ -26,6 +26,15 @@ const widgetSubmitLimiter = rateLimit({
   message: { success: false, message: 'Too many booking attempts from this address, please try again later' },
 });
 
+// The AI assistant costs money per call: a visitor gets a short burst, then a slow trickle.
+const assistantLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'You are asking a lot of questions, please try again in a few minutes' },
+});
+
 // Public marketing-site forms (support message, demo request): same shape as the
 // widget submit limiter but with wording that fits, and a separate counter so
 // a visitor browsing a storefront is not locked out of the contact form.
@@ -96,5 +105,6 @@ module.exports = {
   refreshLimiter,
   sensitiveActionLimiter,
   widgetSubmitLimiter,
+  assistantLimiter,
   publicFormLimiter,
 };

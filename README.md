@@ -73,6 +73,8 @@ Workers (run alongside the API in production):
 | Languages | `Customer.language` (nl/en, from the site language at first booking, editable in the portal) picks the language of every customer email, SMS and WhatsApp. Default `DEFAULT_CUSTOMER_LANGUAGE` (nl) | `lib/i18n.js`, `lib/messages.js`, `lib/customerNotify.js` |
 | WhatsApp | Twilio WhatsApp with approved templates, only for customers who opted in (booking checkbox or portal). STOP/START replies handled at `POST /webhooks/whatsapp`. No template configured, or a failure: SMS. Access codes never use WhatsApp | `lib/whatsapp.js`, `modules/webhooks/whatsapp.controller.js`, `scripts/printWhatsappTemplates.js` |
 
+| AI assistant | `POST /widget/assistant` answers visitor questions from the business's own services, prices, add-ons, areas, hours, cancellation policy, referral offer and FAQ (Anthropic API, `ANTHROPIC_API_KEY`). Stateless, rate limited, cannot book or see accounts. `assistantEnabled` in the storefront payload tells the site whether to show it | `modules/assistant` |
+
 Known limits: bookings created by admins never earn referral rewards; a B2B
 company has one portal login; the day planner estimates driving from straight-line
 distance when addresses lack coordinates.

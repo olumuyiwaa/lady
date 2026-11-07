@@ -3,7 +3,7 @@ const { body } = require('express-validator');
 const controller = require('./widget.controller');
 const { resolveBusinessFromHost } = require('../../middleware/resolveBusinessFromHost');
 const { resolveBusinessFromSlug } = require('../../middleware/resolveBusinessFromSlug');
-const { widgetLimiter, widgetSubmitLimiter } = require('../../middleware/rateLimiter');
+const { widgetLimiter, widgetSubmitLimiter, assistantLimiter } = require('../../middleware/rateLimiter');
 const { requireCaptcha } = require('../../lib/captcha');
 const validate = require('../../middleware/validate');
 const { requireAcceptingBookings } = require('../../middleware/requireActiveSubscription');
@@ -57,6 +57,13 @@ function widgetRoutesFor(resolveBusiness) {
   router.use(widgetLimiter, resolveBusiness);
 
   router.get('/storefront', controller.storefront);
+  router.post(
+    '/assistant',
+    assistantLimiter,
+    [body('messages').isArray({ min: 1, max: 40 }), body('language').optional({ nullable: true }).isIn(['nl', 'en'])],
+    validate,
+    controller.assistant
+  );
   router.get('/address-lookup', controller.addressLookup);
   router.get('/service-area', controller.serviceArea);
   router.post('/quote', requireAcceptingBookings, [body('serviceId').notEmpty()], validate, controller.quote);

@@ -321,6 +321,7 @@ async function getStorefront(businessId) {
     services,
     questions,
     onboardingComplete,
+    assistantEnabled: require('../assistant/assistant.service').enabled(),
     payment: {
       onlineCardReady: canPayByCard,
       offlineAccepted: canPayOffline,

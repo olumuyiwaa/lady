@@ -1,6 +1,15 @@
 const service = require('./widget.service');
 const { success } = require('../../utils/response');
 
+async function assistant(req, res, next) {
+  try {
+    const data = await require('../assistant/assistant.service').ask(req.businessId, req.body);
+    return success(res, 200, data);
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function storefront(req, res, next) {
   try {
     const data = await service.getStorefront(req.businessId);
@@ -99,4 +108,5 @@ async function contact(req, res, next) {
   }
 }
 
-module.exports = { storefront, addressLookup, serviceArea, quote, slots, submitBooking, giftCardBalance, joinWaitlist, contact };
+module.exports = {
+  assistant, storefront, addressLookup, serviceArea, quote, slots, submitBooking, giftCardBalance, joinWaitlist, contact };
