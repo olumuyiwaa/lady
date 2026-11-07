@@ -463,6 +463,8 @@ model WaitlistEntry {
   contactName        String?
   contactEmail       String?
   contactPhone       String?
+  // 'nl' or 'en', from the site language when joining; null uses the default.
+  language           String?
   serviceId          String?
   service            Service?       @relation(fields: [serviceId], references: [id])
   desiredStart       DateTime

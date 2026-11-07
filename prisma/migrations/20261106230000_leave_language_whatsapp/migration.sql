@@ -40,3 +40,6 @@ ALTER TABLE "CleanerLeave" ADD CONSTRAINT "CleanerLeave_businessId_fkey" FOREIGN
 
 -- AddForeignKey
 ALTER TABLE "CleanerLeave" ADD CONSTRAINT "CleanerLeave_cleanerId_fkey" FOREIGN KEY ("cleanerId") REFERENCES "CleanerProfile"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AlterTable
+ALTER TABLE "WaitlistEntry" ADD COLUMN "language" TEXT;

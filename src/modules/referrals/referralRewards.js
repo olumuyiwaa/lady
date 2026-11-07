@@ -78,10 +78,8 @@ async function issueRewardForBooking(businessId, bookingId, { now = new Date() }
   try {
     await audit({ businessId, action: 'REFERRAL_REWARD_ISSUED', entityType: 'Coupon', entityId: coupon.id, metadata: { bookingId, referrerId: referrer.id, valueCents: coupon.value } });
     const business = await prisma.business.findUnique({ where: { id: businessId }, select: { name: true, currency: true } });
-    const msg = `${business?.name || ''}: thanks for the referral! Your friend's first visit is done. Use code ${coupon.code} for ${money(coupon.value, business?.currency)} off your next booking.`;
-    const client = require('../../lib/notificationClient');
-    if (referrer.phone) await client.sendSms({ to: referrer.phone, body: msg });
-    if (referrer.email) await client.sendEmail({ to: referrer.email, subject: `${business?.name || 'Your cleaning service'}: your referral reward`, text: msg, html: `<p>${msg}</p>` });
+    const { notifyCustomer } = require('../../lib/customerNotify');
+    await notifyCustomer(referrer, 'referralReward', { business: business?.name || '', code: coupon.code, amount: money(coupon.value, business?.currency) }, { html: true });
   } catch (e) {
     logger.warn('referral reward notification failed', { bookingId, error: e.message });
   }

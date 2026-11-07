@@ -51,6 +51,8 @@ router.use('/calendar-feed', require('../modules/calendar/calendarFeed.public.ro
 router.use('/inventory', require('../modules/inventory/inventory.routes'));
 router.use('/compliance', require('../modules/compliance/compliance.routes'));
 router.use('/payroll', require('../modules/payroll/payroll.routes'));
+// Twilio inbound WhatsApp (STOP/START). Public, but signature-checked.
+router.post('/webhooks/whatsapp', require('../modules/webhooks/whatsapp.controller').handle);
 router.use('/leave', require('../modules/leave/leave.routes'));
 router.use('/waitlist', require('../modules/waitlist/waitlist.routes'));
 router.use('/invoices', require('../modules/invoices/invoices.routes'));

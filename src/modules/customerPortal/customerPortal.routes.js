@@ -39,6 +39,13 @@ function portalRoutesFor(resolveBusiness) {
     controller.setPreferredCleaner
   );
 
+  router.put(
+    '/preferences',
+    [body('language').optional().isIn(['nl', 'en']), body('whatsappOptIn').optional().isBoolean({ strict: true })],
+    validate,
+    controller.setPreferences
+  );
+
   router.get('/bookings', controller.listBookings);
   router.get('/bookings/:id/timeline', controller.getTimeline);
   router.get('/complaints', controller.listComplaints);

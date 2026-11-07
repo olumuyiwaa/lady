@@ -123,11 +123,10 @@ async function requestAccess(businessId, { phone, email } = {}) {
     },
   });
 
-  const text = `Your Tod Cleaning Services access code is ${code}. It expires in 10 minutes.`;
   try {
     // An email login never triggers an SMS: the customer chose email, and SMS costs money.
-    if (!viaEmail && customer.phone) await notificationClient.sendSms({ to: customer.phone, body: text });
-    if (customer.email) await notificationClient.sendEmail({ to: customer.email, subject: 'Your access code', text });
+    // Access codes never go over WhatsApp (see lib/messages NO_WHATSAPP).
+    await require('../../lib/customerNotify').notifyCustomer(customer, 'accessCode', { business: 'Tod Cleaning Services', code }, { phone: !viaEmail });
   } catch (e) {
     logger.error('failed to send portal OTP', e);
   }
@@ -607,6 +606,38 @@ async function setPreferredCleaner(businessId, customerId, cleanerId) {
 }
 
 /** Everything the portal home screen needs in one call. */
+/** { language, whatsappOptIn } as the portal shows it. */
+function preferencesOf(c) {
+  const { languageFor } = require('../../lib/i18n');
+  return { language: languageFor(c), whatsappOptIn: require('../../lib/whatsapp').canWhatsapp(c ? { ...c, phone: c.phone || 'x' } : null) };
+}
+
+/**
+ * Language and WhatsApp consent, changed by the logged-in (OTP-verified) customer.
+ * Turning WhatsApp on records the consent time; turning it off records an opt-out.
+ */
+async function setPreferences(businessId, customerId, { language, whatsappOptIn } = {}) {
+  const { normalizeLanguage } = require('../../lib/i18n');
+  const data = {};
+  if (language !== undefined) {
+    const l = normalizeLanguage(language);
+    if (!l) throw Object.assign(new Error('Language must be nl or en'), { status: 422 });
+    data.language = l;
+  }
+  if (whatsappOptIn !== undefined) {
+    if (typeof whatsappOptIn !== 'boolean') throw Object.assign(new Error('whatsappOptIn must be true or false'), { status: 422 });
+    if (whatsappOptIn) {
+      data.whatsappOptInAt = new Date();
+    } else {
+      data.whatsappOptOutAt = new Date();
+    }
+  }
+  const customer = await prisma.customer.findFirst({ where: { id: customerId, businessId }, select: { id: true } });
+  if (!customer) throw Object.assign(new Error('Customer not found'), { status: 404 });
+  const updated = await prisma.customer.update({ where: { id: customerId }, data, select: { language: true, whatsappOptInAt: true, whatsappOptOutAt: true } });
+  return preferencesOf(updated);
+}
+
 async function getOverview(businessId, customerId, portalUserId) {
   const now = new Date();
   const open = { notIn: ['CANCELLED', 'COMPLETED'] };
@@ -629,9 +660,10 @@ async function getOverview(businessId, customerId, portalUserId) {
   const preferred = mine.cleaners.find((c) => c.id === mine.preferredCleanerId) || null;
   // Never let the business-account lookup take the whole home panel down.
   const acct = await prisma.customer
-    .findFirst({ where: { id: customerId, businessId }, select: { companyName: true, paymentTermsDays: true } })
+    .findFirst({ where: { id: customerId, businessId }, select: { companyName: true, paymentTermsDays: true, language: true, whatsappOptInAt: true, whatsappOptOutAt: true } })
     .catch(() => null);
   return {
+    preferences: preferencesOf(acct),
     company: acct && acct.companyName ? { name: acct.companyName, paymentTermsDays: acct.paymentTermsDays } : null,
     nextBooking: next,
     counts: { upcoming, completed, total },
@@ -648,6 +680,8 @@ async function getOverview(businessId, customerId, portalUserId) {
 }
 
 module.exports = {
+  setPreferences,
+  preferencesOf,
   getReferral,
   listMyCleaners,
   setPreferredCleaner,

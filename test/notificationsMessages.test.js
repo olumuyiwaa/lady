@@ -44,6 +44,15 @@ test('notifyPaymentRequest loads the customer when the booking does not carry it
 });
 
 test('confirmation message tells the customer the booking is confirmed', async () => {
-  await n.notifyBookingConfirmed('biz', { ...booking, customer });
+  await n.notifyBookingConfirmed('biz', { ...booking, customer: { ...customer, language: 'en' } });
   expect(client.sendSms.mock.calls[0][0].body).toMatch(/confirmed/);
+});
+
+test('messages go out in Dutch by default and in the customer language when set', async () => {
+  await n.notifyBookingConfirmed('biz', { ...booking, customer });
+  expect(client.sendSms.mock.calls[0][0].body).toMatch(/bevestigd/);
+  expect(client.sendEmail.mock.calls[0][0].subject).toBe('Je boeking is bevestigd');
+  jest.clearAllMocks();
+  await n.notifyBookingConfirmed('biz', { ...booking, customer: { ...customer, language: 'en' } });
+  expect(client.sendEmail.mock.calls[0][0].subject).toBe('Your booking is confirmed');
 });

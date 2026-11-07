@@ -2,19 +2,21 @@ const prisma = require('../../config/database');
 const { getIo } = require('../../config/socket');
 const logger = require('../../config/logger');
 const notificationClient = require('../../lib/notificationClient');
+const { notifyCustomer } = require('../../lib/customerNotify');
+const { languageFor } = require('../../lib/i18n');
 const { hashToken, randomToken } = require('../../utils/tokens');
 const { formatDateTime } = require('../../utils/format');
 
 // Business timezones change rarely; a short cache avoids a query per message.
 const tzCache = new Map();
-async function when(businessId, date) {
+async function when(businessId, date, language) {
   let entry = tzCache.get(businessId);
   if (!entry || entry.expires < Date.now()) {
     const biz = await prisma.business.findUnique({ where: { id: businessId }, select: { timezone: true } });
     entry = { tz: (biz && biz.timezone) || 'Europe/Amsterdam', expires: Date.now() + 5 * 60 * 1000 };
     tzCache.set(businessId, entry);
   }
-  return formatDateTime(date, { timeZone: entry.tz });
+  return formatDateTime(date, { timeZone: entry.tz, locale: language === 'en' ? 'en-GB' : language === 'nl' ? 'nl-NL' : undefined });
 }
 
 // Invite links live longer than a forgot-password link (7 days vs 1 hour) —
@@ -90,11 +92,8 @@ async function notifyBookingCreated(businessId, booking) {
 }
 
 async function sendCustomerBookingConfirmation(businessId, booking, customer) {
-  const title = 'Your booking request was received';
-  const text = `Thanks ${customer.firstName || ''}, we received your booking for ${await when(businessId, booking.scheduledStart)}. We'll notify you when it's confirmed.`;
   try {
-    if (customer.email) await notificationClient.sendEmail({ to: customer.email, subject: title, text });
-    if (customer.phone) await notificationClient.sendSms({ to: customer.phone, body: text });
+    await notifyCustomer(customer, 'bookingReceived', { name: customer.firstName || '', when: await when(businessId, booking.scheduledStart, languageFor(customer)) });
   } catch (e) {
     logger.error('failed to send customer booking confirmation', e);
   }
@@ -156,20 +155,8 @@ module.exports = { sendInvite, notifyBookingCreated, sendCustomerBookingConfirma
  * customer directly.
  */
 async function notifyOnMyWay(business, booking, customer) {
-  const etaNote = "They'll arrive shortly.";
-  const smsBody = `${business.name}: your cleaner is on their way! ${etaNote}`;
   try {
-    if (customer?.phone) {
-      await notificationClient.sendSms({ to: customer.phone, body: smsBody });
-    }
-    if (customer?.email) {
-      await notificationClient.sendEmail({
-        to: customer.email,
-        subject: `${business.name}: your cleaner is on the way`,
-        text: smsBody,
-        html: `<p>${smsBody}</p>`,
-      });
-    }
+    if (customer) await notifyCustomer(customer, 'onMyWay', { business: business.name }, { html: true });
   } catch (e) {
     logger.error('failed to send on-my-way notification', e);
   }
@@ -223,21 +210,14 @@ async function portalUrl(businessId) {
   return biz && biz.subdomain ? `${base}/${biz.subdomain}/portal` : base;
 }
 
-async function sendToCustomer(customer, title, text, logLabel) {
-  try {
-    if (customer.email) await notificationClient.sendEmail({ to: customer.email, subject: title, text });
-    if (customer.phone) await notificationClient.sendSms({ to: customer.phone, body: text });
-  } catch (e) {
-    logger.error(`failed to send ${logLabel}`, e);
-  }
-}
-
 async function requestReview(businessId, booking, customer) {
-  const title = 'How was your cleaning?';
   // The message used to ask for a review without saying where to leave it.
   const link = await portalUrl(businessId);
-  const text = `Hi ${customer.firstName || ''}, thanks for choosing us. Please rate your recent cleaning and leave a short review: ${link}`;
-  await sendToCustomer(customer, title, text, 'review request');
+  try {
+    await notifyCustomer(customer, 'reviewRequest', { name: customer.firstName || '', link });
+  } catch (e) {
+    logger.error('failed to send review request', e);
+  }
   // also notify business members that review was requested
   return notifyMembers(businessId, 'REVIEW_REQUESTED', 'Review requested', `Review request sent for booking ${booking.id}`);
 }
@@ -249,9 +229,11 @@ async function requestReview(businessId, booking, customer) {
 const requestCustomerReview = requestReview;
 
 async function sendCustomerPaymentLink(businessId, booking, customer, url) {
-  const title = 'Payment for your cleaning';
-  const text = `Hi ${customer.firstName || ''}, thank you for your booking on ${await when(businessId, booking.scheduledStart)}. You can pay securely online here: ${url}`;
-  await sendToCustomer(customer, title, text, 'payment link');
+  try {
+    await notifyCustomer(customer, 'paymentLink', { name: customer.firstName || '', when: await when(businessId, booking.scheduledStart, languageFor(customer)), url });
+  } catch (e) {
+    logger.error('failed to send payment link', e);
+  }
 }
 
 async function notifyPaymentRequest(businessId, booking, url) {
@@ -264,8 +246,15 @@ async function notifyPaymentRequest(businessId, booking, url) {
 async function notifyBookingConfirmed(businessId, booking) {
   const customer = booking.customer || (await prisma.customer.findUnique({ where: { id: booking.customerId } }));
   if (!customer) return null;
-  const text = `Hi ${customer.firstName || ''}, your cleaning on ${await when(businessId, booking.scheduledStart)} is confirmed. Manage your booking: ${await portalUrl(businessId)}`;
-  return sendToCustomer(customer, 'Your booking is confirmed', text, 'booking confirmation');
+  try {
+    return await notifyCustomer(customer, 'bookingConfirmed', {
+      name: customer.firstName || '',
+      when: await when(businessId, booking.scheduledStart, languageFor(customer)),
+      link: await portalUrl(businessId),
+    });
+  } catch (e) {
+    logger.error('failed to send booking confirmation', e);
+  }
 }
 
 async function notifyCleanerUnassigned(businessId, booking, cleanerUserId) {
@@ -282,11 +271,8 @@ async function notifyCleanerUnassigned(businessId, booking, cleanerUserId) {
 }
 
 async function sendBookingReminder(businessId, booking, customer) {
-  const title = 'Upcoming cleaning reminder';
-  const text = `Hi ${customer?.firstName || ''}, this is a reminder that your cleaning is scheduled for ${await when(businessId, booking.scheduledStart)}.`;
   try {
-    if (customer?.email) await notificationClient.sendEmail({ to: customer.email, subject: title, text });
-    if (customer?.phone) await notificationClient.sendSms({ to: customer.phone, body: text });
+    if (customer) await notifyCustomer(customer, 'reminder', { name: customer.firstName || '', when: await when(businessId, booking.scheduledStart, languageFor(customer)) });
   } catch (e) {
     logger.error('failed to send customer reminder', e);
   }

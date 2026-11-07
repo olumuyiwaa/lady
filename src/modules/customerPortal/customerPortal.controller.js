@@ -114,6 +114,7 @@ const handler = (fn, status = 200) => async (req, res, next) => {
 const party = (req) => ({ type: 'CUSTOMER', customerId: req.portalCustomerId, userId: req.portalUserId });
 
 const getOverview = handler((req) => service.getOverview(req.businessId, req.portalCustomerId, req.portalUserId));
+const setPreferences = handler((req) => service.setPreferences(req.businessId, req.portalCustomerId, req.body));
 const getReferral = handler((req) => service.getReferral(req.businessId, req.portalCustomerId));
 const listMyCleaners = handler((req) => service.listMyCleaners(req.businessId, req.portalCustomerId));
 const setPreferredCleaner = handler((req) =>
@@ -165,6 +166,7 @@ const listMessages = handler((req) =>
 const postMessage = handler((req) => chat.postMessage(req.businessId, req.params.id, party(req), req.body), 201);
 
 module.exports = {
+  setPreferences,
   b2bSummary,
   b2bExportCsv,
   b2bStatementHtml,

@@ -92,6 +92,20 @@ async function _sendSmsNow({ to, body }) {
   return twClient.messages.create({ body, from: TWILIO_FROM(), to });
 }
 
+async function _sendWhatsappNow({ to, contentSid, variables }) {
+  const wa = require('./whatsapp');
+  if (!twClient || !wa.enabled()) {
+    logger.info('sendWhatsapp fallback (no Twilio WhatsApp sender):', { to, contentSid });
+    return Promise.resolve();
+  }
+  return twClient.messages.create({
+    from: wa.asWhatsappAddress(process.env.TWILIO_WHATSAPP_FROM),
+    to: wa.asWhatsappAddress(to),
+    contentSid,
+    contentVariables: JSON.stringify(variables || {}),
+  });
+}
+
 /**
  * tokens: string | string[] of FCM registration tokens.
  * Returns { successCount, failureCount, invalidTokens } so callers can prune
@@ -138,6 +152,14 @@ async function sendSms(payload) {
   return _sendSmsNow(payload);
 }
 
+async function sendWhatsapp(payload) {
+  if (process.env.NOTIFICATION_QUEUE === 'true' && queue) {
+    await queue.add('whatsapp', payload, { attempts: 5 });
+    return { queued: true };
+  }
+  return _sendWhatsappNow(payload);
+}
+
 async function sendPush(payload) {
   if (process.env.NOTIFICATION_QUEUE === 'true' && queue) {
     await queue.add('push', payload, { attempts: 3 });
@@ -155,4 +177,4 @@ function isEmailConfigured() {
   return !!(process.env.SENDGRID_API_KEY || transporter);
 }
 
-module.exports = { sendEmail, sendSms, sendPush, isEmailConfigured, _sendEmailNow, _sendSmsNow, _sendPushNow };
+module.exports = { sendEmail, sendSms, sendWhatsapp, sendPush, isEmailConfigured, _sendEmailNow, _sendSmsNow, _sendWhatsappNow, _sendPushNow };

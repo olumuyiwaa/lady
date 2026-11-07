@@ -68,6 +68,11 @@ Workers (run alongside the API in production):
 | Referrals | Admin-managed settings, abuse checks, reward promised at booking and issued when the booking completes (after a configurable hold). One reward per booking | `lib/referral.js`, `modules/referrals` |
 | Insights | Revenue, demand by weekday/hour, repeat rate, cancellations, per-cleaner rating and punctuality, plus plain-language findings | `lib/insights.js`, `GET /reports/insights?from=&to=` (default last 30 days, max range enforced) |
 
+| Leave | Cleaners request time off (`POST /cleaners/me/leave`); managers approve or reject (`/leave`) or record it directly. Approved leave blocks assignment and removes the cleaner from matching, the day planner and slot capacity. Approving returns the jobs that need reassigning | `modules/leave`, `lib/leave.js` |
+| Quality report | Per branch and month: rating, checklist completion, punctuality (check-in within 10 min of start), complaints. JSON and PDF in the customer's language | `lib/qualityReport.js`, `modules/b2b/quality.pdf.js`, `GET /portal/b2b/quality(.pdf)` |
+| Languages | `Customer.language` (nl/en, from the site language at first booking, editable in the portal) picks the language of every customer email, SMS and WhatsApp. Default `DEFAULT_CUSTOMER_LANGUAGE` (nl) | `lib/i18n.js`, `lib/messages.js`, `lib/customerNotify.js` |
+| WhatsApp | Twilio WhatsApp with approved templates, only for customers who opted in (booking checkbox or portal). STOP/START replies handled at `POST /webhooks/whatsapp`. No template configured, or a failure: SMS. Access codes never use WhatsApp | `lib/whatsapp.js`, `modules/webhooks/whatsapp.controller.js`, `scripts/printWhatsappTemplates.js` |
+
 Known limits: bookings created by admins never earn referral rewards; a B2B
 company has one portal login; the day planner estimates driving from straight-line
 distance when addresses lack coordinates.

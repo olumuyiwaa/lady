@@ -39,7 +39,7 @@ async function loadContext(businessId, bookingId, party) {
   const booking = await prisma.booking.findFirst({
     where,
     include: {
-      customer: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
+      customer: { select: { id: true, firstName: true, lastName: true, email: true, phone: true, language: true, whatsappOptInAt: true, whatsappOptOutAt: true } },
       assignments: {
         include: { cleaner: { include: { user: { select: { id: true, firstName: true, lastName: true } } } } },
       },
@@ -210,13 +210,10 @@ async function notifyCounterpart(booking, party, text, previousSentAt) {
   if (previousSentAt && Date.now() - new Date(previousSentAt).getTime() < EMAIL_THROTTLE_MS) return;
   const email = booking.customer?.email;
   if (!email) return;
-  const notificationClient = require('../../lib/notificationClient');
   const cleaner = booking.assignments.find((a) => a.cleaner?.userId === party.userId)?.cleaner?.user;
   const who = cleaner?.firstName || 'Your cleaner';
   const business = await prisma.business.findUnique({ where: { id: booking.businessId }, select: { name: true } });
-  const subject = `${business?.name || 'Your cleaning service'}: new message from ${who}`;
-  const textBody = `${who} sent you a message about your booking:\n\n"${preview}"\n\nSign in to your customer portal to reply.`;
-  await notificationClient.sendEmail({ to: email, subject, text: textBody });
+  await require('../../lib/customerNotify').notifyCustomer(booking.customer, 'chatMessage', { business: business?.name || 'Tod Cleaning Services', who, preview }, { phone: false });
 }
 
 /** Unread messages from cleaners across all of a customer's bookings. */

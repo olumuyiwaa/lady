@@ -251,7 +251,7 @@ async function applyGiftCardToBooking(businessId, booking, giftCardCode) {
  * ever changed by the customer through a verified flow or by the business
  * from the dashboard.
  */
-async function upsertGuestCustomer(client, businessId, { firstName, lastName, email, phone }) {
+async function upsertGuestCustomer(client, businessId, { firstName, lastName, email, phone, language, whatsappOptIn }) {
   // The same person types their number several ways; match every stored form so
   // a booking never creates a duplicate customer, then store new customers in
   // normalised form (see lib/phone.js).
@@ -261,7 +261,9 @@ async function upsertGuestCustomer(client, businessId, { firstName, lastName, em
   return client.customer.upsert({
     where: { businessId_phone: { businessId, phone: normalized } },
     update: {},
-    create: { businessId, firstName, lastName, email, phone: normalized },
+    // Language and WhatsApp consent are only taken for a NEW customer. For an existing one
+    // (found by phone number) they change only through the verified portal, like email.
+    create: { businessId, firstName, lastName, email, phone: normalized, language: require('../../lib/i18n').normalizeLanguage(language), ...(whatsappOptIn === true ? { whatsappOptInAt: new Date() } : {}) },
   });
 }
 
@@ -577,7 +579,7 @@ async function maybeCreateRecurringSchedule(businessId, booking, customer, frequ
  */
 async function submitBooking(businessId, payload) {
   const {
-    firstName, lastName, email, phone,
+    firstName, lastName, email, phone, language, whatsappOptIn,
     addressLine1, city, postalCode,
     serviceId, addOnIds = [], scheduledStart,
     couponCode, giftCardCode, referralCode,
@@ -612,7 +614,7 @@ async function submitBooking(businessId, payload) {
 
     const result = await withBusinessLock(businessId, async (tx) => {
       await assertCapacity(businessId, start, end, q);
-      const cust = await upsertGuestCustomer(tx, businessId, { firstName, lastName, email, phone });
+      const cust = await upsertGuestCustomer(tx, businessId, { firstName, lastName, email, phone, language, whatsappOptIn });
       await assertCustomerNotSpamming(tx, cust.id);
 
       if (coupon.perCustomerLimit) {
@@ -679,7 +681,7 @@ async function submitBooking(businessId, payload) {
     const eligible = ref && priceCents >= refSettings.minBookingCents;
     const discount = eligible ? Math.min(refSettings.discountCents, priceCents) : 0;
 
-    const cust = await upsertGuestCustomer(tx, businessId, { firstName, lastName, email, phone });
+    const cust = await upsertGuestCustomer(tx, businessId, { firstName, lastName, email, phone, language, whatsappOptIn });
     await assertCustomerNotSpamming(tx, cust.id);
 
     const b = await tx.booking.create({

@@ -47,6 +47,8 @@ const bookingValidators = [
   body('couponCode').optional().isString(),
   body('giftCardCode').optional().isString(),
   body('referralCode').optional().isString().isLength({ max: 20 }),
+  body('language').optional({ nullable: true }).isIn(['nl', 'en']),
+  body('whatsappOptIn').optional({ nullable: true }).isBoolean().toBoolean(),
 ];
 
 /** Mounts the storefront/quote/slots/bookings endpoints behind whichever tenant-resolution middleware is passed in. */

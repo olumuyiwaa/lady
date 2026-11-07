@@ -17,6 +17,11 @@ async function start() {
     return notificationClient._sendSmsNow(payload);
   });
 
+  notificationQueue.process('whatsapp', 10, async (job) => {
+    logger.info('Processing whatsapp job', { id: job.id, to: job.data && job.data.to });
+    return notificationClient._sendWhatsappNow(job.data);
+  });
+
   notificationQueue.on('completed', (job) => {
     logger.info('notification job completed', { id: job.id, name: job.name });
   });

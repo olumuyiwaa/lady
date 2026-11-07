@@ -55,6 +55,7 @@ async function joinWaitlist(businessId, payload = {}) {
       contactName: contactName || null,
       contactEmail: contactEmail || null,
       contactPhone: contactPhone || null,
+      language: require('../../lib/i18n').normalizeLanguage(payload.language),
       desiredStart: start,
       desiredEnd: end,
       notes: notes || null,
@@ -122,18 +123,14 @@ async function notifyWaitlistForFreedSlot(businessId, { serviceId, scheduledStar
 
   for (const entry of candidates) {
     try {
-      const msg = `${business?.name || 'Your cleaning business'}: a slot just opened up for ${new Date(
-        scheduledStart
-      ).toLocaleString()}. Book now before it's gone!`;
-      if (entry.contactPhone) await notificationClient.sendSms({ to: entry.contactPhone, body: msg });
-      if (entry.contactEmail) {
-        await notificationClient.sendEmail({
-          to: entry.contactEmail,
-          subject: `${business?.name || 'Tod Cleaning Services'}: a slot opened up`,
-          text: msg,
-          html: `<p>${msg}</p>`,
-        });
-      }
+      const { notifyCustomer } = require('../../lib/customerNotify');
+      const { languageFor } = require('../../lib/i18n');
+      const recipient = { email: entry.contactEmail, phone: entry.contactPhone, language: entry.language };
+      const locale = languageFor(recipient) === 'en' ? 'en-GB' : 'nl-NL';
+      const whenText = new Intl.DateTimeFormat(locale, { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Amsterdam' }).format(new Date(scheduledStart));
+      const sent = await notifyCustomer(recipient, 'waitlistOpened', { business: business?.name || 'Tod Cleaning Services', when: whenText }, { html: true });
+      // Leave the entry WAITING when nothing was delivered, so a later freed slot can try again.
+      if (!sent.email && !sent.sms && !sent.whatsapp) throw new Error('no channel delivered the waitlist message');
       await prisma.waitlistEntry.update({ where: { id: entry.id }, data: { status: 'NOTIFIED', notifiedAt: new Date() } });
       notified += 1;
     } catch (e) {
