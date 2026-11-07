@@ -33,6 +33,10 @@ set up?" checks keep working. Prices are VAT-inclusive; see `src/lib/vat.js`.
 Add one webhook endpoint at `/api/v1/webhooks/stripe` and put its signing
 secret in `STRIPE_WEBHOOK_SECRETS`.
 
+## Launch
+
+See [docs/LAUNCH.md](docs/LAUNCH.md): Stripe webhook and iDEAL, WhatsApp templates, assistant key, logo, legal dates and the staging walk-through. `node scripts/stagingSmoke.js` checks a deployed API.
+
 ## Setup
 
 ```bash
