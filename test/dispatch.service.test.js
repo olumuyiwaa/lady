@@ -4,6 +4,7 @@ jest.mock('../src/config/database.js', () => ({
   bookingAssignment: { create: jest.fn(), findMany: jest.fn(), findFirst: jest.fn().mockResolvedValue(null), count: jest.fn(), delete: jest.fn() },
   businessSubscription: { findUnique: jest.fn() },
   customer: { findUnique: jest.fn() },
+  cleanerLeave: { findFirst: jest.fn().mockResolvedValue(null) },
 }));
 jest.mock('../src/utils/audit', () => ({ audit: jest.fn() }));
 jest.mock('../src/config/logger', () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn() }));

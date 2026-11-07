@@ -183,6 +183,7 @@ model Business {
   members              BusinessMember[]
   cleaners             CleanerProfile[]
   calendarFeeds        CalendarFeed[]
+  cleanerLeaves        CleanerLeave[]
   bookingQuestions     BookingQuestion[]
   customers            Customer[]
   services             Service[]
@@ -656,6 +657,7 @@ model CleanerProfile {
   deviceTokens CleanerDeviceToken[]
   calendarFeeds CalendarFeed[]
   trainingAcks ChemicalTrainingAck[]
+  leaves       CleanerLeave[]
 
   // Payroll — how this cleaner is paid, what each completed job has earned
   // them against that rate, and the payout batches settling those earnings.
@@ -825,6 +827,15 @@ model Customer {
   // Plain id, no relation: it is checked in code and never blocks deleting a
   // cleaner. Dispatch suggestions rank this cleaner first when available.
   preferredCleanerId String?
+  // Language for emails, SMS and WhatsApp to this customer: 'nl' or 'en'.
+  // Captured from the site language at booking time; null falls back to
+  // DEFAULT_CUSTOMER_LANGUAGE (see lib/i18n.js).
+  language           String?
+  // WhatsApp consent. Messages are only sent while whatsappOptInAt is set and
+  // whatsappOptOutAt is not later than it. Opt-in comes from the booking form
+  // checkbox or an inbound START; opt-out from an inbound STOP.
+  whatsappOptInAt    DateTime?
+  whatsappOptOutAt   DateTime?
   // Business account details (see lib/b2bAccount.js). A customer with a
   // company name is a B2B account: invoices are addressed to the company and
   // are due after `paymentTermsDays`; the portal shows the business view.
@@ -1770,4 +1781,47 @@ model Transaction {
   @@index([occurredAt(sort: Desc)])
   @@index([bookingId])
   @@index([stripePaymentIntentId])
+}
+
+
+enum LeaveType {
+  VACATION
+  SICK
+  PERSONAL
+  OTHER
+}
+
+enum LeaveStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+// Time off for a cleaner. startsAt is the start of the first day and endsAt the
+// start of the day after the last day, both as instants in the business time
+// zone, so [startsAt, endsAt) can be compared directly with booking times.
+// Only APPROVED leave blocks assignment, matching and slot availability.
+model CleanerLeave {
+  id          String         @id @default(cuid())
+  businessId  String
+  business    Business       @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  cleanerId   String
+  cleaner     CleanerProfile @relation(fields: [cleanerId], references: [id], onDelete: Cascade)
+  type        LeaveType      @default(VACATION)
+  status      LeaveStatus    @default(PENDING)
+  startsAt    DateTime
+  endsAt      DateTime
+  reason      String?
+  // Manager's note when approving or rejecting.
+  decisionNote String?
+  decidedById String?
+  decidedAt   DateTime?
+  // Set when a manager recorded the leave on the cleaner's behalf.
+  createdById String?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@index([businessId, status])
+  @@index([cleanerId, status, startsAt])
 }

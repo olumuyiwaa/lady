@@ -1,4 +1,4 @@
-jest.mock('../src/config/database.js', () => ({ bookingAssignment: { findFirst: jest.fn() } }));
+jest.mock('../src/config/database.js', () => ({ bookingAssignment: { findFirst: jest.fn() }, cleanerLeave: { findFirst: jest.fn().mockResolvedValue(null) } }));
 const prisma = require('../src/config/database.js');
 const { assertCleanerFree } = require('../src/lib/assignmentConflicts');
 
@@ -14,6 +14,12 @@ describe('assignmentConflicts', () => {
     expect(where.booking.scheduledStart).toEqual({ lt: end });
     expect(where.booking.scheduledEnd).toEqual({ gt: start });
     expect(where.booking.status).toEqual({ not: 'CANCELLED' });
+  });
+
+  test('approved leave blocks the assignment with a 409', async () => {
+    prisma.cleanerLeave.findFirst.mockResolvedValueOnce({ id: 'l1' });
+    await expect(assertCleanerFree('cl1', start, end)).rejects.toMatchObject({ status: 409, leaveId: 'l1' });
+    expect(prisma.bookingAssignment.findFirst).not.toHaveBeenCalled();
   });
 
   test('a genuine overlap is a 409 naming the clashing booking', async () => {

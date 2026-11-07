@@ -30,6 +30,9 @@
  *   GET  /cleaners/me/documents/:id/download-url
  *   POST   /cleaners/me/device-token          { token, platform? }
  *   DELETE /cleaners/me/device-token          { token }
+ *   GET    /cleaners/me/leave
+ *   POST   /cleaners/me/leave           { type?, startDate, endDate, reason? } request time off (needs manager approval)
+ *   DELETE /cleaners/me/leave/:id       withdraw a pending or approved leave
  *   POST /cleaners/me/location               { latitude, longitude } live position ping (dispatch map)
  *   GET  /cleaners/me/earnings                real payroll figures (see payroll module) — replaces the
  *                                              client-side estimate the Flutter app used to compute
@@ -62,6 +65,16 @@ router.post(
   validate,
   controller.avatarUploadUrl
 );
+
+const leaveController = require('../leave/leave.controller');
+router.get('/me/leave', leaveController.myList);
+router.post(
+  '/me/leave',
+  [body('startDate').matches(/^\d{4}-\d{2}-\d{2}$/), body('endDate').matches(/^\d{4}-\d{2}-\d{2}$/), body('type').optional().isIn(['VACATION', 'SICK', 'PERSONAL', 'OTHER'])],
+  validate,
+  leaveController.myRequest
+);
+router.delete('/me/leave/:id', leaveController.myCancel);
 
 router.get('/me/availability', controller.getAvailability);
 router.put('/me/availability', [body('slots').isArray()], validate, controller.updateAvailability);

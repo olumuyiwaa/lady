@@ -116,8 +116,11 @@ async function findAvailableCleaners(businessId, startDate, endDate, { maxDistan
   const biz = await prisma.business.findUnique({ where: { id: businessId }, select: { timezone: true } });
   const timeZone = (biz && biz.timezone) || 'Europe/Amsterdam';
 
+  const onLeave = await require('./leave').cleanersOnLeave(cleaners.map((c) => c.id), startDate, endDate);
+
   const candidates = [];
   for (const c of cleaners) {
+    if (onLeave.has(c.id)) continue; // approved time off
     const hasSlot = c.availability && c.availability.some((s) => slotCovers(s, startDate, endDate, timeZone));
     if (!hasSlot) continue;
 

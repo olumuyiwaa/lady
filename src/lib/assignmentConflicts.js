@@ -27,6 +27,7 @@ async function findCleanerConflict(cleanerId, start, end, { excludeBookingId } =
 }
 
 async function assertCleanerFree(cleanerId, start, end, opts = {}) {
+  await require('./leave').assertCleanerNotOnLeave(cleanerId, start, end);
   const conflict = await findCleanerConflict(cleanerId, start, end, opts);
   if (conflict) {
     const err = new Error('Cleaner has another booking during this time');
