@@ -1,6 +1,8 @@
 const { verifyAccessToken } = require('../../utils/jwt');
+const prisma = require('../../config/database');
+const { scopeOfMember, isAdminScope } = require('../../lib/companyScope');
 
-function requireCustomerPortal(req, res, next) {
+async function requireCustomerPortal(req, res, next) {
   const header = req.headers.authorization || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
   if (!token) {
@@ -22,6 +24,19 @@ function requireCustomerPortal(req, res, next) {
     }
     req.portalCustomerId = payload.portalCustomerId;
     req.portalUserId = payload.sub;
+    req.portalScope = null; // the account holder: no restriction
+    if (payload.portalMemberId) {
+      // Read live, so switching a member off or changing their locations applies at once.
+      const member = await prisma.companyMember.findFirst({
+        where: { id: payload.portalMemberId, customerId: payload.portalCustomerId, isActive: true },
+      });
+      if (!member) {
+        const err = new Error('Invalid or expired token');
+        err.status = 401;
+        return next(err);
+      }
+      req.portalScope = scopeOfMember(member);
+    }
     next();
   } catch (e) {
     const err = new Error('Invalid or expired token');
@@ -30,4 +45,12 @@ function requireCustomerPortal(req, res, next) {
   }
 }
 
-module.exports = { requireCustomerPortal };
+/** Company-wide actions: the account holder and ADMIN members only. */
+function requirePortalAdmin(req, res, next) {
+  if (isAdminScope(req.portalScope)) return next();
+  const err = new Error('This is only available to company admins');
+  err.status = 403;
+  return next(err);
+}
+
+module.exports = { requireCustomerPortal, requirePortalAdmin };

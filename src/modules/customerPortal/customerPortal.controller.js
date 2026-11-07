@@ -49,7 +49,7 @@ async function getInvoiceHtml(req, res, next) {
 
 async function listBookings(req, res, next) {
   try {
-    const data = await service.listMyBookings(req.businessId, req.portalCustomerId);
+    const data = await service.listMyBookings(req.businessId, req.portalCustomerId, req.portalScope);
     return success(res, 200, data);
   } catch (err) {
     next(err);
@@ -113,7 +113,7 @@ const handler = (fn, status = 200) => async (req, res, next) => {
 
 const party = (req) => ({ type: 'CUSTOMER', customerId: req.portalCustomerId, userId: req.portalUserId });
 
-const getOverview = handler((req) => service.getOverview(req.businessId, req.portalCustomerId, req.portalUserId));
+const getOverview = handler((req) => service.getOverview(req.businessId, req.portalCustomerId, req.portalUserId, req.portalScope));
 const setPreferences = handler((req) => service.setPreferences(req.businessId, req.portalCustomerId, req.body));
 const getReferral = handler((req) => service.getReferral(req.businessId, req.portalCustomerId));
 const listMyCleaners = handler((req) => service.listMyCleaners(req.businessId, req.portalCustomerId));
@@ -121,10 +121,10 @@ const setPreferredCleaner = handler((req) =>
   service.setPreferredCleaner(req.businessId, req.portalCustomerId, req.body.cleanerId || null)
 );
 const b2bService = require('../b2b/b2b.service');
-const b2bSummary = handler((req) => b2bService.getSummary(req.businessId, req.portalCustomerId, req.query.month));
+const b2bSummary = handler((req) => b2bService.getSummary(req.businessId, req.portalCustomerId, req.query.month, req.portalScope));
 async function b2bExportCsv(req, res, next) {
   try {
-    const csv = await b2bService.exportVisitsCsv(req.businessId, req.portalCustomerId, { from: req.query.from, to: req.query.to, month: req.query.month });
+    const csv = await b2bService.exportVisitsCsv(req.businessId, req.portalCustomerId, { from: req.query.from, to: req.query.to, month: req.query.month }, req.portalScope);
     res.set('Content-Type', 'text/csv; charset=utf-8');
     res.set('Content-Disposition', 'attachment; filename="visits.csv"');
     res.set('Cache-Control', 'no-store');
@@ -143,10 +143,10 @@ async function b2bStatementHtml(req, res, next) {
     next(err);
   }
 }
-const b2bQuality = handler((req) => b2bService.getQualityReport(req.businessId, req.portalCustomerId, req.query.month));
+const b2bQuality = handler((req) => b2bService.getQualityReport(req.businessId, req.portalCustomerId, req.query.month, req.portalScope));
 async function b2bQualityPdf(req, res, next) {
   try {
-    const pdf = await b2bService.renderQualityPdfFor(req.businessId, req.portalCustomerId, req.query.month);
+    const pdf = await b2bService.renderQualityPdfFor(req.businessId, req.portalCustomerId, req.query.month, req.portalScope);
     const month = /^\d{4}-\d{2}$/.test(req.query.month || '') ? req.query.month : 'report';
     res.set('Content-Type', 'application/pdf');
     res.set('Content-Disposition', `attachment; filename="quality-${month}.pdf"`);
@@ -158,7 +158,18 @@ async function b2bQualityPdf(req, res, next) {
 }
 const complaints = require('../supportTickets/complaints.service');
 const createComplaint = handler((req) => complaints.createComplaint(req.businessId, req.portalCustomerId, req.params.id, req.body), 201);
-const listComplaints = handler((req) => complaints.listMyComplaints(req.businessId, req.portalCustomerId));
+const listComplaints = handler((req) => service.listMyComplaintsInScope(req.businessId, req.portalCustomerId, req.portalScope));
+
+const members = require('../b2b/members.service');
+const listMembers = handler((req) => members.list(req.businessId, req.portalCustomerId));
+const listMemberLocations = handler((req) => members.listLocations(req.businessId, req.portalCustomerId));
+const createMember = handler((req) => members.create(req.businessId, req.portalCustomerId, req.body), 201);
+const updateMember = handler((req) =>
+  members.update(req.businessId, req.portalCustomerId, req.params.memberId, req.body, { actorMemberId: req.portalScope && req.portalScope.memberId })
+);
+const removeMember = handler((req) =>
+  members.deactivate(req.businessId, req.portalCustomerId, req.params.memberId, { actorMemberId: req.portalScope && req.portalScope.memberId })
+);
 const getTimeline = handler((req) => service.getMyTimeline(req.businessId, req.portalCustomerId, req.params.id));
 const listMessages = handler((req) =>
   chat.listMessages(req.businessId, req.params.id, party(req), { after: req.query.after })
@@ -174,6 +185,11 @@ module.exports = {
   b2bQualityPdf,
   createComplaint,
   listComplaints,
+  listMembers,
+  listMemberLocations,
+  createMember,
+  updateMember,
+  removeMember,
   getOverview,
   getReferral,
   listMyCleaners,

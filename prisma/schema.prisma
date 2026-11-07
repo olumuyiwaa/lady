@@ -184,6 +184,7 @@ model Business {
   cleaners             CleanerProfile[]
   calendarFeeds        CalendarFeed[]
   cleanerLeaves        CleanerLeave[]
+  companyMembers       CompanyMember[]
   bookingQuestions     BookingQuestion[]
   customers            Customer[]
   services             Service[]
@@ -811,6 +812,8 @@ model CleanerAvailability {
 
 model Customer {
   invoices Invoice[]
+  // People who may sign in to this company's portal (business accounts only).
+  members  CompanyMember[]
   id           String   @id @default(cuid())
   businessId   String
   business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
@@ -1826,4 +1829,36 @@ model CleanerLeave {
 
   @@index([businessId, status])
   @@index([cleanerId, status, startsAt])
+}
+
+
+enum CompanyMemberRole {
+  // Sees and manages everything of the company, including its team.
+  ADMIN
+  // Sees and acts on bookings and reports of the listed locations only.
+  BRANCH_MANAGER
+}
+
+// A person (besides the account holder) who signs in to a business account's
+// portal with their own phone or email. locationKeys are the branch keys from
+// lib/b2bAccount.locationKey; ADMIN members have none (all locations).
+model CompanyMember {
+  id           String            @id @default(cuid())
+  businessId   String
+  business     Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customerId   String
+  customer     Customer          @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  firstName    String
+  lastName     String
+  email        String?
+  phone        String?
+  role         CompanyMemberRole @default(BRANCH_MANAGER)
+  locationKeys String[]
+  isActive     Boolean           @default(true)
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  @@index([businessId, email])
+  @@index([businessId, phone])
+  @@index([customerId])
 }

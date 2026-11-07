@@ -12,6 +12,7 @@ const { createAncillaryCheckoutSession } = require('../../lib/stripeClient');
 const { findCustomerByPhone } = require('../../lib/phone');
 const { buildTimeline } = require('../../lib/bookingTimeline');
 const { getReferralSettings } = require('../../lib/referral');
+const companyScope = require('../../lib/companyScope');
 
 const OTP_TTL_MS = 10 * 60 * 1000;
 const OTP_MAX_REQUESTS_PER_WINDOW = 3;
@@ -40,16 +41,21 @@ function portalEmailFor(customerId) {
   return `portal-${customerId}@portal.invalid`;
 }
 
-async function findOrCreatePortalUser(customer) {
-  const email = portalEmailFor(customer.id);
+// A team member of a business account has an identity row of their own, so their
+// one-time codes and failed attempts are never mixed with the account holder's.
+const portalMemberEmailFor = (memberId) => `portal-member-${memberId}@portal.invalid`;
+const portalEmailOf = (customer, member) => (member ? portalMemberEmailFor(member.id) : portalEmailFor(customer.id));
+
+async function findOrCreatePortalUser(customer, member) {
+  const email = portalEmailOf(customer, member);
   const existing = await prisma.user.findUnique({ where: { email } });
   if (existing) return existing;
   const bcrypt = require('bcryptjs');
   return prisma.user.create({
     data: {
       email,
-      firstName: customer.firstName,
-      lastName: customer.lastName,
+      firstName: (member || customer).firstName,
+      lastName: (member || customer).lastName,
       passwordHash: await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 10),
       isActive: true,
     },
@@ -74,25 +80,43 @@ function normalizeEmail(raw) {
  */
 async function findPortalCustomer(businessId, { phone, email }) {
   if (typeof phone === 'string' && phone.trim()) {
-    return { customer: await findCustomerByPhone(prisma, businessId, phone), viaEmail: false };
+    const customer = await findCustomerByPhone(prisma, businessId, phone);
+    if (customer) return { customer, member: null, viaEmail: false };
+    return { ...(await findMemberAccount(businessId, { phone })), viaEmail: false };
   }
   const address = normalizeEmail(email);
-  if (!address) return { customer: null, viaEmail: false };
+  if (!address) return { customer: null, member: null, viaEmail: false };
   const customer = await prisma.customer.findFirst({
     where: { businessId, email: { equals: address, mode: 'insensitive' } },
     orderBy: { createdAt: 'asc' },
   });
-  return { customer, viaEmail: true };
+  if (customer) return { customer, member: null, viaEmail: true };
+  return { ...(await findMemberAccount(businessId, { email: address })), viaEmail: true };
+}
+
+/**
+ * A team member of a business account: the login belongs to the member, the data
+ * to the company customer. Switched-off members and members of a company that is
+ * no longer a business account find nothing.
+ */
+async function findMemberAccount(businessId, { phone, email }) {
+  const where = phone
+    ? { businessId, isActive: true, phone: { in: require('../../lib/phone').phoneLookupVariants(phone) } }
+    : { businessId, isActive: true, email: { equals: email, mode: 'insensitive' } };
+  const member = await prisma.companyMember.findFirst({ where, include: { customer: true }, orderBy: { createdAt: 'asc' } });
+  if (!member || !member.customer || !member.customer.companyName) return { customer: null, member: null };
+  const { customer, ...bare } = member;
+  return { customer, member: bare };
 }
 
 async function requestAccess(businessId, { phone, email } = {}) {
-  const { customer, viaEmail } = await findPortalCustomer(businessId, { phone, email });
+  const { customer, member, viaEmail } = await findPortalCustomer(businessId, { phone, email });
   if (!customer) {
     // Do not leak existence — still return success shape
     return { sent: true };
   }
 
-  const user = await findOrCreatePortalUser(customer);
+  const user = await findOrCreatePortalUser(customer, member);
   const since = new Date(Date.now() - OTP_TTL_MS);
 
   // Cap how many codes can be requested per window (SMS-bombing / cost abuse).
@@ -126,7 +150,9 @@ async function requestAccess(businessId, { phone, email } = {}) {
   try {
     // An email login never triggers an SMS: the customer chose email, and SMS costs money.
     // Access codes never go over WhatsApp (see lib/messages NO_WHATSAPP).
-    await require('../../lib/customerNotify').notifyCustomer(customer, 'accessCode', { business: 'Tod Cleaning Services', code }, { phone: !viaEmail });
+    // A team member gets the code on their own email/phone, in the company's language.
+    const recipient = member ? { email: member.email, phone: member.phone, language: customer.language } : customer;
+    await require('../../lib/customerNotify').notifyCustomer(recipient, 'accessCode', { business: 'Tod Cleaning Services', code }, { phone: !viaEmail });
   } catch (e) {
     logger.error('failed to send portal OTP', e);
   }
@@ -141,10 +167,10 @@ async function verifyAccess(businessId, { phone, email, code }) {
     return err;
   };
 
-  const { customer } = await findPortalCustomer(businessId, { phone, email });
+  const { customer, member } = await findPortalCustomer(businessId, { phone, email });
   if (!customer) throw invalid();
 
-  const user = await prisma.user.findUnique({ where: { email: portalEmailFor(customer.id) } });
+  const user = await prisma.user.findUnique({ where: { email: portalEmailOf(customer, member) } });
   if (!user) throw invalid();
 
   const since = new Date(Date.now() - OTP_TTL_MS);
@@ -187,7 +213,7 @@ async function verifyAccess(businessId, { phone, email, code }) {
   // cleaner session even though it shares the signing secret.
   const jwt = require('jsonwebtoken');
   const token = jwt.sign(
-    { sub: user.id, businessId, portalCustomerId: customer.id, scope: 'CUSTOMER_PORTAL' },
+    { sub: user.id, businessId, portalCustomerId: customer.id, ...(member ? { portalMemberId: member.id } : {}), scope: 'CUSTOMER_PORTAL' },
     process.env.JWT_SECRET,
     { expiresIn: PORTAL_TOKEN_TTL, audience: 'customer-portal' }
   );
@@ -196,21 +222,80 @@ async function verifyAccess(businessId, { phone, email, code }) {
     token,
     customer: {
       id: customer.id,
-      firstName: customer.firstName,
-      lastName: customer.lastName,
-      email: customer.email,
-      phone: customer.phone,
+      firstName: (member || customer).firstName,
+      lastName: (member || customer).lastName,
+      email: (member || customer).email,
+      phone: (member || customer).phone,
     },
+    // Present for team members: what they may do in the portal.
+    member: member ? { id: member.id, role: member.role, locationKeys: member.role === 'ADMIN' ? [] : member.locationKeys } : null,
   };
 }
 
-async function listMyBookings(businessId, customerId) {
-  return prisma.booking.findMany({
+async function listMyBookings(businessId, customerId, scope = null) {
+  const restricted = companyScope.isRestricted(scope);
+  const rows = await prisma.booking.findMany({
     where: { businessId, customerId },
     include: { service: true, review: true, assignments: { include: { cleaner: { include: { user: { select: { firstName: true, lastName: true } } } } } } },
     orderBy: { scheduledStart: 'desc' },
-    take: 100,
+    // A branch manager only keeps some of the rows, so look further back before filtering.
+    take: restricted ? 1000 : 100,
   });
+  return restricted ? companyScope.filterInScope(scope, rows).slice(0, 100) : rows;
+}
+
+/** 404 unless the booking exists, is the customer's, and is inside the member's locations. */
+async function assertBookingInScope(businessId, customerId, bookingId, scope) {
+  if (!companyScope.isRestricted(scope)) return;
+  const b = await prisma.booking.findFirst({
+    where: { id: bookingId, businessId, customerId },
+    select: { addressLine1: true, postalCode: true, city: true },
+  });
+  if (!b || !companyScope.inScope(scope, b)) {
+    const err = new Error('Booking not found');
+    err.status = 404;
+    throw err;
+  }
+}
+
+/** Complaints limited to the bookings a branch manager may see. */
+async function listMyComplaintsInScope(businessId, customerId, scope) {
+  const all = await require('../supportTickets/complaints.service').listMyComplaints(businessId, customerId);
+  if (!companyScope.isRestricted(scope)) return all;
+  const ids = all.map((c) => c.bookingId).filter(Boolean);
+  const bookings = ids.length ? await prisma.booking.findMany({ where: { id: { in: ids }, businessId, customerId }, select: { id: true, addressLine1: true, postalCode: true, city: true } }) : [];
+  const allowed = new Set(bookings.filter((b) => companyScope.inScope(scope, b)).map((b) => b.id));
+  return all.filter((c) => c.bookingId && allowed.has(c.bookingId));
+}
+
+/**
+ * Home panel for a branch manager: only their locations, and none of the
+ * company-wide parts (referral code, preferred cleaner, message preferences).
+ */
+async function getScopedOverview(businessId, customerId, scope) {
+  const now = new Date();
+  const rows = await prisma.booking.findMany({
+    where: { businessId, customerId },
+    include: {
+      service: { select: { id: true, name: true } },
+      assignments: { include: { cleaner: { include: { user: { select: { firstName: true, lastName: true } } } } } },
+    },
+    orderBy: { scheduledStart: 'asc' },
+    take: 2000,
+  });
+  const mine = companyScope.filterInScope(scope, rows);
+  const open = (b) => !['CANCELLED', 'COMPLETED'].includes(b.status);
+  const upcoming = mine.filter((b) => open(b) && new Date(b.scheduledStart) >= now);
+  const acct = await prisma.customer.findFirst({ where: { id: customerId, businessId }, select: { companyName: true, paymentTermsDays: true } }).catch(() => null);
+  return {
+    company: acct && acct.companyName ? { name: acct.companyName, paymentTermsDays: null } : null,
+    nextBooking: upcoming[0] || null,
+    counts: { upcoming: upcoming.length, completed: mine.filter((b) => b.status === 'COMPLETED').length, total: mine.length },
+    unreadMessages: 0,
+    preferences: null,
+    preferredCleaner: null,
+    referral: null,
+  };
 }
 
 /**
@@ -638,7 +723,13 @@ async function setPreferences(businessId, customerId, { language, whatsappOptIn 
   return preferencesOf(updated);
 }
 
-async function getOverview(businessId, customerId, portalUserId) {
+async function getOverview(businessId, customerId, portalUserId, scope = null) {
+  const access = { role: scope ? scope.role : 'OWNER', locationKeys: scope ? scope.locationKeys : [] };
+  if (companyScope.isRestricted(scope)) return { ...(await getScopedOverview(businessId, customerId, scope)), access };
+  return { ...(await getFullOverview(businessId, customerId, portalUserId)), access };
+}
+
+async function getFullOverview(businessId, customerId, portalUserId) {
   const now = new Date();
   const open = { notIn: ['CANCELLED', 'COMPLETED'] };
   const [next, upcoming, completed, total, referral, mine, unreadMessages] = await Promise.all([
@@ -680,6 +771,8 @@ async function getOverview(businessId, customerId, portalUserId) {
 }
 
 module.exports = {
+  assertBookingInScope,
+  listMyComplaintsInScope,
   setPreferences,
   preferencesOf,
   getReferral,

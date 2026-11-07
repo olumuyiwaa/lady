@@ -7,7 +7,7 @@ systems and two content items. Tick them off in order. Run
 ## 1. Deploy and migrate
 
 - [ ] Set the environment from `.env.example` (see sections 2-4 for the keys that matter).
-- [ ] `npm ci && npx prisma generate && npm run migrate` (the latest migration adds leave,
+- [ ] `npm ci && npx prisma generate && npm run migrate` (the latest migrations add leave, company team members (`20261107120000_company_members`),
       customer language, WhatsApp consent and waitlist language).
 - [ ] `OWNER_EMAIL=... OWNER_PASSWORD=... npm run seed` on a fresh database.
 - [ ] `PUBLIC_API_URL` is the public https URL of this API, no trailing slash.

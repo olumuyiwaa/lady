@@ -1,5 +1,6 @@
 jest.mock('../src/config/database.js', () => ({
   customer: { findFirst: jest.fn() },
+  companyMember: { findFirst: jest.fn() },
   user: { findUnique: jest.fn(), create: jest.fn(), findFirst: jest.fn() },
   otpCode: { count: jest.fn(), updateMany: jest.fn(), create: jest.fn(), findFirst: jest.fn() },
 }));
@@ -167,5 +168,34 @@ describe('portal tokens versus staff sessions', () => {
     const next = jest.fn();
     requireCustomerPortal({ headers: { authorization: `Bearer ${access}` } }, {}, next);
     expect(next.mock.calls[0][0].status).toBe(401);
+  });
+});
+
+describe('company team member login', () => {
+  const company = { ...customer, companyName: 'Acme BV', language: 'nl' };
+  const member = { id: 'm1', customerId: 'cust1', role: 'BRANCH_MANAGER', locationKeys: ['k'], email: 'jo@acme.nl', phone: null, firstName: 'Jo', lastName: 'K', isActive: true, customer: company };
+  const memberUser = { id: 'pu-m1', email: 'portal-member-m1@portal.invalid' };
+
+  beforeEach(() => {
+    jest.resetAllMocks();
+    prisma.customer.findFirst.mockResolvedValue(null); // not a customer
+    prisma.companyMember.findFirst.mockResolvedValue(member);
+    prisma.user.findUnique.mockResolvedValue(memberUser);
+  });
+
+  test('the code goes to the member\'s own email, not the company contact', async () => {
+    await service.requestAccess('biz1', { email: 'jo@acme.nl' });
+    expect(notificationClient.sendEmail).toHaveBeenCalledTimes(1);
+    expect(notificationClient.sendEmail.mock.calls[0][0].to).toBe('jo@acme.nl');
+    expect(notificationClient.sendSms).not.toHaveBeenCalled();
+  });
+
+  test('the token carries the member id, the company id and the member scope', async () => {
+    prisma.otpCode.findFirst.mockResolvedValue({ id: 'otp1' });
+    const out = await service.verifyAccess('biz1', { email: 'jo@acme.nl', code: '123456' });
+    const payload = jwt.verify(out.token, 'test-secret', { audience: 'customer-portal' });
+    expect(payload.portalCustomerId).toBe('cust1');
+    expect(payload.portalMemberId).toBe('m1');
+    expect(out.member).toMatchObject({ id: 'm1', role: 'BRANCH_MANAGER', locationKeys: ['k'] });
   });
 });

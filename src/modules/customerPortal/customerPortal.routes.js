@@ -1,11 +1,12 @@
 const express = require('express');
 const { body } = require('express-validator');
 const controller = require('./customerPortal.controller');
+const portalService = require('./customerPortal.service');
 const { resolveBusinessFromHost } = require('../../middleware/resolveBusinessFromHost');
 const { resolveBusinessFromSlug } = require('../../middleware/resolveBusinessFromSlug');
 const { widgetLimiter } = require('../../middleware/rateLimiter');
 const validate = require('../../middleware/validate');
-const { requireCustomerPortal } = require('./customerPortal.middleware');
+const { requireCustomerPortal, requirePortalAdmin } = require('./customerPortal.middleware');
 
 /**
  * Shared portal route tree. Tenant is resolved by the middleware passed in
@@ -29,11 +30,22 @@ function portalRoutesFor(resolveBusiness) {
   // Authenticated portal actions
   router.use(requireCustomerPortal);
 
+  // A branch manager may only open bookings at their own locations.
+  router.param('id', async (req, res, next, id) => {
+    try {
+      await portalService.assertBookingInScope(req.businessId, req.portalCustomerId, id, req.portalScope);
+      next();
+    } catch (err) {
+      next(err);
+    }
+  });
+
   router.get('/overview', controller.getOverview);
-  router.get('/referral', controller.getReferral);
-  router.get('/cleaners', controller.listMyCleaners);
+  router.get('/referral', requirePortalAdmin, controller.getReferral);
+  router.get('/cleaners', requirePortalAdmin, controller.listMyCleaners);
   router.put(
     '/preferences/cleaner',
+    requirePortalAdmin,
     [body('cleanerId').optional({ nullable: true }).isString()],
     validate,
     controller.setPreferredCleaner
@@ -41,6 +53,7 @@ function portalRoutesFor(resolveBusiness) {
 
   router.put(
     '/preferences',
+    requirePortalAdmin,
     [body('language').optional().isIn(['nl', 'en']), body('whatsappOptIn').optional().isBoolean({ strict: true })],
     validate,
     controller.setPreferences
@@ -52,9 +65,25 @@ function portalRoutesFor(resolveBusiness) {
   // Business accounts only (403 otherwise, enforced in b2b.service).
   router.get('/b2b/summary', controller.b2bSummary);
   router.get('/b2b/export.csv', controller.b2bExportCsv);
-  router.get('/b2b/statement/html', controller.b2bStatementHtml);
+  router.get('/b2b/statement/html', requirePortalAdmin, controller.b2bStatementHtml);
   router.get('/b2b/quality', controller.b2bQuality);
   router.get('/b2b/quality.pdf', controller.b2bQualityPdf);
+
+  // Team: company admins manage who else can log in and which branches they see.
+  const memberBody = [
+    body('firstName').optional().isString(),
+    body('lastName').optional().isString(),
+    body('email').optional({ values: 'falsy' }).isEmail(),
+    body('phone').optional({ values: 'falsy' }).isString(),
+    body('role').optional().isIn(['ADMIN', 'BRANCH_MANAGER']),
+    body('locationKeys').optional().isArray({ max: 200 }),
+    body('isActive').optional().isBoolean({ strict: true }),
+  ];
+  router.get('/b2b/locations', requirePortalAdmin, controller.listMemberLocations);
+  router.get('/b2b/members', requirePortalAdmin, controller.listMembers);
+  router.post('/b2b/members', requirePortalAdmin, memberBody, validate, controller.createMember);
+  router.put('/b2b/members/:memberId', requirePortalAdmin, memberBody, validate, controller.updateMember);
+  router.delete('/b2b/members/:memberId', requirePortalAdmin, controller.removeMember);
   router.post(
     '/bookings/:id/complaint',
     [body('category').optional().isString(), body('description').isString().isLength({ min: 10, max: 2000 })],

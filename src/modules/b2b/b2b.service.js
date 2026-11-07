@@ -11,6 +11,7 @@ const b2b = require('../../lib/b2bAccount');
 const { buildQualityReport } = require('../../lib/qualityReport');
 const { languageFor } = require('../../lib/i18n');
 const { renderQualityPdf } = require('./quality.pdf');
+const companyScope = require('../../lib/companyScope');
 
 function httpError(status, message) {
   const err = new Error(message);
@@ -78,7 +79,7 @@ function invoiceFigures(invoices, now = Date.now()) {
   return { openCount: open.length, openCents: sum(open), overdueCount: overdue.length, overdueCents: sum(overdue) };
 }
 
-async function getSummary(businessId, customerId, month) {
+async function getSummary(businessId, customerId, month, scope = null) {
   const { customer, timeZone, currency } = await loadAccount(businessId, customerId);
   const range = b2b.monthRange(month, timeZone);
   const prevRange = b2b.monthRange(range.previous, timeZone);
@@ -86,24 +87,28 @@ async function getSummary(businessId, customerId, month) {
 
   const [bookings, prevBookings, openInvoices, issued] = await Promise.all([
     prisma.booking.findMany({ where: where(range), include: { service: { select: { name: true } } }, orderBy: { scheduledStart: 'asc' }, take: 2000 }),
-    prisma.booking.findMany({ where: where(prevRange), select: { quotedPriceCents: true }, take: 2000 }),
+    prisma.booking.findMany({ where: where(prevRange), select: { quotedPriceCents: true, addressLine1: true, postalCode: true, city: true }, take: 2000 }),
     prisma.invoice.findMany({ where: { businessId, customerId, paidAt: null }, select: { grossCents: true, dueAt: true, paidAt: true }, take: 1000 }),
     prisma.invoice.findMany({ where: { businessId, customerId, issuedAt: { gte: range.from, lt: range.to } }, select: { grossCents: true }, take: 1000 }),
   ]);
 
-  const agg = aggregate(bookings);
+  const restricted = companyScope.isRestricted(scope);
+  const mine = restricted ? companyScope.filterInScope(scope, bookings) : bookings;
+  const prevMine = restricted ? companyScope.filterInScope(scope, prevBookings) : prevBookings;
+  const agg = aggregate(mine);
   return {
     month: range.month,
     currency,
     company: { name: customer.companyName, kvkNumber: customer.kvkNumber, vatNumber: customer.vatNumber, paymentTermsDays: customer.paymentTermsDays },
     ...agg,
-    previousSpendCents: prevBookings.reduce((a, b) => a + (b.quotedPriceCents || 0), 0),
-    invoices: { issuedCount: issued.length, issuedCents: issued.reduce((a, i) => a + i.grossCents, 0), ...invoiceFigures(openInvoices) },
+    previousSpendCents: prevMine.reduce((a, b) => a + (b.quotedPriceCents || 0), 0),
+    // Invoices are company-wide, so a branch manager does not get them.
+    invoices: restricted ? { issuedCount: 0, issuedCents: 0, openCount: 0, openCents: 0, overdueCount: 0, overdueCents: 0 } : { issuedCount: issued.length, issuedCents: issued.reduce((a, i) => a + i.grossCents, 0), ...invoiceFigures(openInvoices) },
   };
 }
 
 /** CSV of visits between two dates (inclusive of `from`, exclusive of `to`). */
-async function exportVisitsCsv(businessId, customerId, { from, to, month }) {
+async function exportVisitsCsv(businessId, customerId, { from, to, month }, scope = null) {
   const { timeZone } = await loadAccount(businessId, customerId);
   let start = from ? new Date(from) : null;
   let end = to ? new Date(to) : null;
@@ -116,12 +121,13 @@ async function exportVisitsCsv(businessId, customerId, { from, to, month }) {
   if (!start || !end || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) throw httpError(422, 'Choose a valid date range');
   if (end - start > 400 * 24 * 3600 * 1000) throw httpError(422, 'Date range is too long (max 400 days)');
 
-  const bookings = await prisma.booking.findMany({
+  const all = await prisma.booking.findMany({
     where: { businessId, customerId, scheduledStart: { gte: start, lt: end } },
     include: { service: { select: { name: true } }, invoice: { select: { number: true, paidAt: true, dueAt: true } } },
     orderBy: { scheduledStart: 'asc' },
     take: 5000,
   });
+  const bookings = companyScope.filterInScope(scope, all);
   const fmt = new Intl.DateTimeFormat('sv-SE', { timeZone, dateStyle: 'short', timeStyle: 'short' });
   const eur = (c) => ((c || 0) / 100).toFixed(2);
   const rows = [['Date', 'Location', 'Service', 'Status', 'Hours', 'Travel fee', 'Total incl. VAT', 'Invoice', 'Paid']];
@@ -176,15 +182,16 @@ async function renderStatementHtml(businessId, customerId, month) {
 }
 
 /** Quality figures per branch for a month: JSON for the portal and the data behind the PDF. */
-async function getQualityReport(businessId, customerId, month) {
+async function getQualityReport(businessId, customerId, month, scope = null) {
   const { customer, timeZone, businessName } = await loadAccount(businessId, customerId);
   const range = b2b.monthRange(month, timeZone);
-  const bookings = await prisma.booking.findMany({
+  const allBookings = await prisma.booking.findMany({
     where: { businessId, customerId, status: { not: 'CANCELLED' }, scheduledStart: { gte: range.from, lt: range.to } },
     include: { review: { select: { rating: true } }, checklist: { select: { items: true } }, assignments: { select: { checkedInAt: true } } },
     orderBy: { scheduledStart: 'asc' },
     take: 2000,
   });
+  const bookings = companyScope.filterInScope(scope, allBookings);
   const tickets = bookings.length
     ? await prisma.supportTicket.findMany({ where: { businessId, kind: 'COMPLAINT', bookingId: { in: bookings.map((b) => b.id) } }, select: { bookingId: true }, take: 5000 })
     : [];
@@ -194,8 +201,8 @@ async function getQualityReport(businessId, customerId, month) {
   return { month: range.month, company: { name: customer.companyName }, businessName, language: languageFor(customer), ...report };
 }
 
-async function renderQualityPdfFor(businessId, customerId, month) {
-  const data = await getQualityReport(businessId, customerId, month);
+async function renderQualityPdfFor(businessId, customerId, month, scope = null) {
+  const data = await getQualityReport(businessId, customerId, month, scope);
   return renderQualityPdf({ report: data, month: data.month, companyName: data.company.name, businessName: data.businessName, language: data.language });
 }
 
