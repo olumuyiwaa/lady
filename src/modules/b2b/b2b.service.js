@@ -8,6 +8,9 @@
  */
 const prisma = require('../../config/database');
 const b2b = require('../../lib/b2bAccount');
+const { buildQualityReport } = require('../../lib/qualityReport');
+const { languageFor } = require('../../lib/i18n');
+const { renderQualityPdf } = require('./quality.pdf');
 
 function httpError(status, message) {
   const err = new Error(message);
@@ -172,4 +175,28 @@ async function renderStatementHtml(businessId, customerId, month) {
 </body></html>`;
 }
 
-module.exports = { getSummary, exportVisitsCsv, renderStatementHtml, aggregate, invoiceFigures, loadAccount };
+/** Quality figures per branch for a month: JSON for the portal and the data behind the PDF. */
+async function getQualityReport(businessId, customerId, month) {
+  const { customer, timeZone, businessName } = await loadAccount(businessId, customerId);
+  const range = b2b.monthRange(month, timeZone);
+  const bookings = await prisma.booking.findMany({
+    where: { businessId, customerId, status: { not: 'CANCELLED' }, scheduledStart: { gte: range.from, lt: range.to } },
+    include: { review: { select: { rating: true } }, checklist: { select: { items: true } }, assignments: { select: { checkedInAt: true } } },
+    orderBy: { scheduledStart: 'asc' },
+    take: 2000,
+  });
+  const tickets = bookings.length
+    ? await prisma.supportTicket.findMany({ where: { businessId, kind: 'COMPLAINT', bookingId: { in: bookings.map((b) => b.id) } }, select: { bookingId: true }, take: 5000 })
+    : [];
+  const byBooking = new Map();
+  for (const t of tickets) byBooking.set(t.bookingId, (byBooking.get(t.bookingId) || 0) + 1);
+  const report = buildQualityReport(bookings, byBooking, label);
+  return { month: range.month, company: { name: customer.companyName }, businessName, language: languageFor(customer), ...report };
+}
+
+async function renderQualityPdfFor(businessId, customerId, month) {
+  const data = await getQualityReport(businessId, customerId, month);
+  return renderQualityPdf({ report: data, month: data.month, companyName: data.company.name, businessName: data.businessName, language: data.language });
+}
+
+module.exports = { getQualityReport, renderQualityPdfFor, getSummary, exportVisitsCsv, renderStatementHtml, aggregate, invoiceFigures, loadAccount };

@@ -46,6 +46,8 @@ function portalRoutesFor(resolveBusiness) {
   router.get('/b2b/summary', controller.b2bSummary);
   router.get('/b2b/export.csv', controller.b2bExportCsv);
   router.get('/b2b/statement/html', controller.b2bStatementHtml);
+  router.get('/b2b/quality', controller.b2bQuality);
+  router.get('/b2b/quality.pdf', controller.b2bQualityPdf);
   router.post(
     '/bookings/:id/complaint',
     [body('category').optional().isString(), body('description').isString().isLength({ min: 10, max: 2000 })],

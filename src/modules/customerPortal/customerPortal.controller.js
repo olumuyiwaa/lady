@@ -142,6 +142,19 @@ async function b2bStatementHtml(req, res, next) {
     next(err);
   }
 }
+const b2bQuality = handler((req) => b2bService.getQualityReport(req.businessId, req.portalCustomerId, req.query.month));
+async function b2bQualityPdf(req, res, next) {
+  try {
+    const pdf = await b2bService.renderQualityPdfFor(req.businessId, req.portalCustomerId, req.query.month);
+    const month = /^\d{4}-\d{2}$/.test(req.query.month || '') ? req.query.month : 'report';
+    res.set('Content-Type', 'application/pdf');
+    res.set('Content-Disposition', `attachment; filename="quality-${month}.pdf"`);
+    res.set('Cache-Control', 'no-store');
+    return res.send(pdf);
+  } catch (err) {
+    next(err);
+  }
+}
 const complaints = require('../supportTickets/complaints.service');
 const createComplaint = handler((req) => complaints.createComplaint(req.businessId, req.portalCustomerId, req.params.id, req.body), 201);
 const listComplaints = handler((req) => complaints.listMyComplaints(req.businessId, req.portalCustomerId));
@@ -155,6 +168,8 @@ module.exports = {
   b2bSummary,
   b2bExportCsv,
   b2bStatementHtml,
+  b2bQuality,
+  b2bQualityPdf,
   createComplaint,
   listComplaints,
   getOverview,
